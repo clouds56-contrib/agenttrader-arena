@@ -1,0 +1,28 @@
+{
+  "name": "agenttrader-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client SDK for the AgentTrader competition platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agenttrader",
+    "trading",
+    "agent",
+    "sdk"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
