@@ -38,8 +38,9 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          ENV_CONTENT: ${{ secrets.ENV_CONTENT }}
         run: |
-          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ] || [ -z "$ENV_CONTENT" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -67,6 +68,28 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Sync Vercel production env
+        if: steps.config.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          ENV_CONTENT: ${{ secrets.ENV_CONTENT }}
+        run: |
+          while IFS= read -r line || [ -n "$line" ]; do
+            line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -n "$line" ] || continue
+            case "$line" in
+              \#*) continue ;;
+            esac
+            key=${line%%=*}
+            value=${line#*=}
+            vercel env rm "$key" production --yes --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
+            printf '%s' "$value" | vercel env add "$key" production --token "$VERCEL_TOKEN"
+          done <<EOF
+          $ENV_CONTENT
+          EOF
 
       - name: Build Vercel deployment
         if: steps.config.outputs.configured == 'true'
