@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.config.outputs.configured == 'true'
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Railway CLI
         if: steps.config.outputs.configured == 'true'

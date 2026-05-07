@@ -4,7 +4,7 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 
 ## Workflows
 
-- `CI`: runs `web-new` lint, tests, and build; runs `workers` tests; builds Docker images for both services; pushes images to GHCR on `main`
+- `CI`: runs `web-new` tests and build; runs `workers` tests; builds Docker images for both services; pushes images to GHCR on `main`
 - `Deploy Workers to Railway`: deploys `workers/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
