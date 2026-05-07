@@ -19,6 +19,7 @@ jobs:
   deploy:
     name: Railway deploy
     runs-on: ubuntu-latest
+    environment: railway
     timeout-minutes: 20
     if: >-
       (github.event_name == 'workflow_dispatch' ||

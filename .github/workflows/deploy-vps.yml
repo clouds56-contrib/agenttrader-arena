@@ -19,6 +19,7 @@ jobs:
   deploy:
     name: VPS deploy
     runs-on: ubuntu-latest
+    environment: vps
     timeout-minutes: 30
     if: vars.ENABLE_VPS_DEPLOY == 'true'
     steps:
