@@ -35,7 +35,7 @@ scripts/envctl --local
 scripts/envctl --github
 ```
 
-For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It does not trigger `ci.yml` unless `--run-ci` is passed.
+For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It batches each target into one `gh secret set -f -` call and one `gh variable set -f -` call. It does not trigger `ci.yml` unless `--run-ci` is passed.
 
 Preset behavior:
 
