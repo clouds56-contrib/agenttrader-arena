@@ -242,6 +242,25 @@ ensure_github_repo() {
   fi
 }
 
+github_environment_name() {
+  local target="$1"
+  case "$target" in
+    github:vps)
+      printf 'vps'
+      ;;
+    github:vercel)
+      printf 'vercel'
+      ;;
+    github:railway)
+      printf 'railway'
+      ;;
+    *)
+      printf 'Unknown GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+}
+
 set_target_entries() {
   local kind="$1"
   shift
@@ -321,7 +340,9 @@ sync_github_target() {
   local repo="$2"
   local ci_ref="$3"
   local run_ci="$4"
-  local key kind value secret_count=0 variable_count=0
+  local github_env key kind value secret_count=0 variable_count=0
+
+  github_env=$(github_environment_name "$target")
 
   case "$target" in
     github:vps)
@@ -352,7 +373,7 @@ sync_github_target() {
     exit 1
   fi
 
-  printf 'Prepared %d GitHub settings for %s\n' "${#TARGET_VALUES[@]}" "$target"
+  printf 'Prepared %d GitHub settings for %s (%s environment)\n' "${#TARGET_VALUES[@]}" "$target" "$github_env"
 
   while IFS= read -r key; do
     kind=${TARGET_KINDS[$key]}
@@ -365,15 +386,15 @@ sync_github_target() {
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
-      printf '[dry-run] %s %s\n' "$kind" "$key"
+      printf '[dry-run] %s %s --env %s\n' "$kind" "$key" "$github_env"
       continue
     fi
 
-    printf 'Updating %s %s\n' "$kind" "$key"
+    printf 'Updating %s %s in %s\n' "$kind" "$key" "$github_env"
     if [[ "$kind" == secret ]]; then
-      printf '%s' "$value" | gh secret set "$key" --repo "$repo" --body -
+      printf '%s' "$value" | gh secret set "$key" --repo "$repo" --env "$github_env" --body -
     else
-      gh variable set "$key" --repo "$repo" --body "$value"
+      gh variable set "$key" --repo "$repo" --env "$github_env" --body "$value"
     fi
   done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
 

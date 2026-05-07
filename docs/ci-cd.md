@@ -11,7 +11,7 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 
 ## Env Control
 
-Use `scripts/envctl` to merge root env sources, generate service env files, and sync GitHub secrets and variables.
+Use `scripts/envctl` to merge root env sources, generate service env files, and sync GitHub Environment-scoped secrets and variables.
 
 Source files:
 
@@ -35,7 +35,7 @@ scripts/envctl --local
 scripts/envctl --github
 ```
 
-For `github:*` outputs, `envctl` skips empty values and does not trigger `ci.yml` unless `--run-ci` is passed.
+For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It does not trigger `ci.yml` unless `--run-ci` is passed.
 
 Preset behavior:
 
@@ -73,6 +73,14 @@ docker load -i docker-image-workers.tar
 ```
 
 ## GitHub Secrets And Variables
+
+The deploy workflows use GitHub Environments:
+
+- `vps`
+- `vercel`
+- `railway`
+
+`scripts/envctl --output github:<target>` writes secrets and variables into the matching environment.
 
 ### Railway
 
