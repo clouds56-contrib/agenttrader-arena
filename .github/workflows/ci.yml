@@ -124,7 +124,7 @@ jobs:
             type=sha,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
-      - name: Build and optionally push image
+      - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -132,6 +132,15 @@ jobs:
           build-args: ${{ matrix.build-args }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
+          outputs: |
+            type=docker,dest=/tmp/${{ matrix.service }}.tar
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Upload Docker image tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-${{ matrix.service }}
+          path: /tmp/${{ matrix.service }}.tar
+          if-no-files-found: error
