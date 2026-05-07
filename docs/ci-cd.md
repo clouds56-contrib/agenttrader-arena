@@ -104,6 +104,7 @@ The deploy workflows use GitHub Environments:
 Secrets:
 
 - `RAILWAY_TOKEN`
+- `RAILWAY_API_TOKEN` as fallback when you are not using a project token
 
 Variables:
 
