@@ -4,7 +4,7 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 
 ## Workflows
 
-- `CI`: runs `web-new` tests and build; runs `workers` tests; builds Docker images for both services; uploads Docker tarball artifacts for both services; pushes images to GHCR on `main`
+- `CI`: runs `web-new` tests and build; runs `workers` tests; builds Docker images for both services; uploads Docker tarball artifacts for both services on every run; pushes images to GHCR only when a GitHub release is published
 - `Deploy Workers to Railway`: deploys `workers/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
@@ -70,12 +70,16 @@ Start from these examples:
 
 ## GHCR Images
 
-The CI workflow publishes these images on `main`:
+The CI workflow publishes images to GHCR only for `release.published` events.
 
-- `ghcr.io/<owner>/agentrader-web-new:main`
-- `ghcr.io/<owner>/agentrader-web-new:sha-<short-sha>`
-- `ghcr.io/<owner>/agentrader-workers:main`
-- `ghcr.io/<owner>/agentrader-workers:sha-<short-sha>`
+Each release publishes three tags per service:
+
+- branch tag: `ghcr.io/<owner>/agentrader-web-new:main`
+- hash tag: `ghcr.io/<owner>/agentrader-web-new:git-<sha:8>`
+- release tag: `ghcr.io/<owner>/agentrader-web-new:<release-tag>`
+- branch tag: `ghcr.io/<owner>/agentrader-workers:main`
+- hash tag: `ghcr.io/<owner>/agentrader-workers:git-<sha:8>`
+- release tag: `ghcr.io/<owner>/agentrader-workers:<release-tag>`
 
 ## Docker Artifacts
 
@@ -153,6 +157,16 @@ Useful variables:
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - runtime keys are typically stored inside `ENV_CONTENT`
+
+Manual VPS deploy accepts:
+
+- `image_tag`: optional registry tag to deploy; leave it empty to deploy the commit selected in GitHub's `Use workflow from` picker
+
+Deploy behavior:
+
+- if `image_tag` is set, the workflow deploys that exact GHCR tag and fails if either service image is missing
+- if `image_tag` is empty, the workflow uses the commit selected in GitHub's `Use workflow from` picker, first tries the release-published `git-<sha:8>` images in GHCR, and falls back to the successful `CI` artifacts for that same commit when the registry images do not exist
+- artifact fallback is intended for unreleased or development commits that were built by `CI` but not published to GHCR
 
 ## Notes
 

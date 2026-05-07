@@ -4,16 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Docker image tag to deploy
+        description: Optional registry tag to deploy; leave empty to deploy the selected workflow commit
         required: false
-        default: main
+        default: ''
 
 concurrency:
   group: deploy-vps
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
+  packages: read
 
 jobs:
   deploy:
@@ -25,25 +27,102 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve deploy image source
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ vars.GHCR_USERNAME || github.repository_owner }}
+          WEB_IMAGE: ${{ vars.VPS_WEB_IMAGE || format('ghcr.io/{0}/agenttrader-web-new', github.repository_owner) }}
+          WORKERS_IMAGE: ${{ vars.VPS_WORKERS_IMAGE || format('ghcr.io/{0}/agenttrader-workers', github.repository_owner) }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin >/dev/null 2>&1
+
+          if [ -n "$IMAGE_TAG" ]; then
+            if docker manifest inspect "$WEB_IMAGE:$IMAGE_TAG" >/dev/null 2>&1 && \
+              docker manifest inspect "$WORKERS_IMAGE:$IMAGE_TAG" >/dev/null 2>&1; then
+              printf 'mode=registry\n' >> "$GITHUB_OUTPUT"
+              printf 'web_deploy_image=%s:%s\n' "$WEB_IMAGE" "$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+              printf 'workers_deploy_image=%s:%s\n' "$WORKERS_IMAGE" "$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            printf 'Requested registry tag not found for both services: %s\n' "$IMAGE_TAG" >&2
+            exit 1
+          fi
+
+          short_sha=${DEPLOY_SHA::7}
+          git_tag="git-$short_sha"
+
+          if docker manifest inspect "$WEB_IMAGE:$git_tag" >/dev/null 2>&1 && \
+            docker manifest inspect "$WORKERS_IMAGE:$git_tag" >/dev/null 2>&1; then
+            printf 'mode=registry\n' >> "$GITHUB_OUTPUT"
+            printf 'web_deploy_image=%s:%s\n' "$WEB_IMAGE" "$git_tag" >> "$GITHUB_OUTPUT"
+            printf 'workers_deploy_image=%s:%s\n' "$WORKERS_IMAGE" "$git_tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?status=success&per_page=100" \
+            --jq '.workflow_runs[] | select(.head_sha == env.DEPLOY_SHA and .conclusion == "success") | .id' \
+            | head -n 1)
+
+          if [ -z "$run_id" ]; then
+            printf 'No successful CI run found for selected workflow commit=%s\n' "$DEPLOY_SHA" >&2
+            exit 1
+          fi
+
+          printf 'mode=artifact\n' >> "$GITHUB_OUTPUT"
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'web_deploy_image=%s:git-%s\n' "$WEB_IMAGE" "$short_sha" >> "$GITHUB_OUTPUT"
+          printf 'workers_deploy_image=%s:git-%s\n' "$WORKERS_IMAGE" "$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Download Docker artifacts
+        if: steps.source.outputs.mode == 'artifact'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          rm -rf artifacts
+          mkdir -p artifacts/web-new artifacts/workers
+          gh run download "${{ steps.source.outputs.run_id }}" -n docker-image-web-new -D artifacts/web-new
+          gh run download "${{ steps.source.outputs.run_id }}" -n docker-image-workers -D artifacts/workers
+
+      - name: Prepare VPS bundle
+        run: |
+          set -eu
+          rm -rf .vps-bundle
+          mkdir -p .vps-bundle
+          cp -R deploy/vps/. .vps-bundle/
+          if [ "${{ steps.source.outputs.mode }}" = 'artifact' ]; then
+            cp artifacts/web-new/*.tar .vps-bundle/web-image.tar
+            cp artifacts/workers/*.tar .vps-bundle/workers-image.tar
+          fi
+
       - name: Upload VPS compose bundle
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: deploy/vps/*
+          source: .vps-bundle/*
           target: ${{ vars.VPS_APP_DIR || '/opt/agenttrader-arena' }}
-          strip_components: 2
+          strip_components: 1
 
       - name: Deploy stack on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
           APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/agenttrader-arena' }}
+          DEPLOY_MODE: ${{ steps.source.outputs.mode }}
           GHCR_USERNAME: ${{ vars.GHCR_USERNAME || github.repository_owner }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           WEB_IMAGE: ${{ vars.VPS_WEB_IMAGE || format('ghcr.io/{0}/agenttrader-web-new', github.repository_owner) }}
           WORKERS_IMAGE: ${{ vars.VPS_WORKERS_IMAGE || format('ghcr.io/{0}/agenttrader-workers', github.repository_owner) }}
-          IMAGE_TAG: ${{ github.event.inputs.image_tag || 'main' }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          WEB_DEPLOY_IMAGE: ${{ steps.source.outputs.web_deploy_image }}
+          WORKERS_DEPLOY_IMAGE: ${{ steps.source.outputs.workers_deploy_image }}
           ENV_CONTENT: ${{ secrets.ENV_CONTENT }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB || 'agentrader' }}
@@ -53,7 +132,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: APP_DIR,GHCR_USERNAME,GHCR_READ_TOKEN,WEB_IMAGE,WORKERS_IMAGE,IMAGE_TAG,ENV_CONTENT,REDIS_PASSWORD,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD
+          envs: APP_DIR,DEPLOY_MODE,GHCR_USERNAME,GHCR_READ_TOKEN,WEB_IMAGE,WORKERS_IMAGE,IMAGE_TAG,WEB_DEPLOY_IMAGE,WORKERS_DEPLOY_IMAGE,ENV_CONTENT,REDIS_PASSWORD,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD
           script: |
             set -eu
             mkdir -p "$APP_DIR"
@@ -62,6 +141,8 @@ jobs:
             WEB_IMAGE=$WEB_IMAGE
             WORKERS_IMAGE=$WORKERS_IMAGE
             IMAGE_TAG=$IMAGE_TAG
+            WEB_DEPLOY_IMAGE=$WEB_DEPLOY_IMAGE
+            WORKERS_DEPLOY_IMAGE=$WORKERS_DEPLOY_IMAGE
             REDIS_PASSWORD=$REDIS_PASSWORD
             POSTGRES_DB=$POSTGRES_DB
             POSTGRES_USER=$POSTGRES_USER
@@ -79,5 +160,10 @@ jobs:
             if [ -n "$GHCR_READ_TOKEN" ]; then
               echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             fi
-            docker compose --env-file .env -f docker-compose.yml pull
-            docker compose --env-file .env -f docker-compose.yml up -d
+            if [ "$DEPLOY_MODE" = 'artifact' ]; then
+              docker load -i web-image.tar
+              docker load -i workers-image.tar
+            else
+              docker compose --env-file .env -f docker-compose.yml pull
+            fi
+            docker compose --env-file .env -f docker-compose.yml up -d --remove-orphans

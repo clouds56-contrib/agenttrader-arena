@@ -27,7 +27,7 @@ services:
       retries: 10
 
   web:
-    image: ${WEB_IMAGE}:${IMAGE_TAG:-main}
+    image: ${WEB_DEPLOY_IMAGE}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -67,7 +67,7 @@ services:
       retries: 10
 
   workers:
-    image: ${WORKERS_IMAGE}:${IMAGE_TAG:-main}
+    image: ${WORKERS_DEPLOY_IMAGE}
     restart: unless-stopped
     depends_on:
       web:
