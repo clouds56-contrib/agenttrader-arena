@@ -61,6 +61,24 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         run: npm install --global vercel@latest
 
+      - name: Install web dependencies
+        if: steps.config.outputs.configured == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Force Vercel framework to Next.js
+        if: steps.config.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          curl --silent --show-error --fail \
+            --request PATCH \
+            --url "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{"framework":"nextjs"}' >/dev/null
+
       - name: Pull Vercel environment
         if: steps.config.outputs.configured == 'true'
         env:
