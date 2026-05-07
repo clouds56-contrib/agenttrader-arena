@@ -9,6 +9,8 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
 
+Railway and Vercel deploys first upsert runtime envs from the environment-scoped `ENV_CONTENT` secret, then run the platform deploy.
+
 ## Env Control
 
 Use `scripts/envctl` to merge root env sources, generate service env files, and sync GitHub Environment-scoped secrets and variables.
@@ -52,7 +54,7 @@ scripts/envctl --github
 
 Use `--show-keys` to inspect the resolved target key list and whether each key is classified as `secret` or `variable`. When `--show-keys` is used, `envctl` only prints keys and does not read input values, write files, sync GitHub settings, or trigger CI.
 
-For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It batches each target into one `gh secret set -f -` call and one `gh variable set -f -` call. It does not trigger `ci.yml` unless `--run-ci` is passed.
+For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It batches each target into one `gh secret set -f -` call and one `gh variable set -f -` call. Runtime envs are packed into a single `ENV_CONTENT` secret per environment. It does not trigger `ci.yml` unless `--run-ci` is passed.
 
 Preset behavior:
 
@@ -105,6 +107,7 @@ Secrets:
 
 - `RAILWAY_TOKEN`
 - `RAILWAY_API_TOKEN` as fallback when you are not using a project token
+- `ENV_CONTENT` for worker runtime envs synced into Railway before deploy
 
 Variables:
 
@@ -117,6 +120,7 @@ Variables:
 Secrets:
 
 - `VERCEL_TOKEN`
+- `ENV_CONTENT` for web runtime envs synced into Vercel before deploy
 
 Variables:
 
@@ -133,44 +137,22 @@ Required secrets:
 - `VPS_USERNAME`
 - `VPS_SSH_KEY`
 - `GHCR_READ_TOKEN`
-- `AUTH_SECRET`
-- `CRON_SECRET`
+- `ENV_CONTENT` for combined web and worker runtime envs
 - `POSTGRES_PASSWORD`
 - `REDIS_PASSWORD`
 
 Optional secrets, depending on your runtime mode:
 
-- `DATABASE_URL`
-- `REDIS_URL`
-- `MASSIVE_API_KEY`
-- `BINANCE_API_KEY`
-- `POLYMARKET_API_KEY`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
+- runtime keys are typically stored inside `ENV_CONTENT`
 
 Useful variables:
 
 - `VPS_APP_DIR`
 - `VPS_WEB_IMAGE`
 - `VPS_WORKERS_IMAGE`
-- `NEXT_PUBLIC_APP_URL`
-- `AUTH_URL`
-- `DATABASE_SSL`
-- `AGENTTRADER_MARKET_DATA_MODE`
-- `AGENTTRADER_COMPETITION_PHASE`
-- `AGENTTRADER_BRIEFING_WINDOW_MINUTES`
 - `POSTGRES_DB`
 - `POSTGRES_USER`
-- `WORKER_ENABLE_SCHEDULER`
-- `WORKER_APP_URL`
-- `BINANCE_ENABLED`
-- `BINANCE_BASE_URL`
-- `MASSIVE_ENABLED`
-- `MASSIVE_BASE_URL`
-- `MASSIVE_SYMBOLS`
-- `MASSIVE_RECENT_SYMBOL_LIMIT`
+- runtime keys are typically stored inside `ENV_CONTENT`
 
 ## Notes
 

@@ -16,6 +16,7 @@ declare -a VERCEL_ENV_KEYS=()
 declare -a RAILWAY_ENV_KEYS=()
 
 SECRETS_KEYS=(
+  ENV_CONTENT
   VPS_HOST
   VPS_USERNAME
   VPS_SSH_KEY
@@ -240,6 +241,7 @@ ensure_github_repo() {
     require_github_cli
     if [[ -z "$REPO" ]]; then
       REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+      printf 'Using GitHub repository: %s\n' "$REPO"
     fi
   fi
 }
@@ -284,19 +286,32 @@ build_github_target_keys() {
   local key
   local -a target_keys=()
 
+  for key in $(build_github_control_keys "$target"); do
+    append_unique target_keys "$key"
+  done
+  append_unique target_keys ENV_CONTENT
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_runtime_target_keys() {
+  local target="$1"
+  local key
+  local -a target_keys=()
+
   case "$target" in
     github:vps)
-      for key in "${VPS_ENV_KEYS[@]}" "${WEB_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
+      for key in "${WEB_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
         append_unique target_keys "$key"
       done
       ;;
     github:vercel)
-      for key in "${VERCEL_ENV_KEYS[@]}" "${WEB_ENV_KEYS[@]}"; do
+      for key in "${WEB_ENV_KEYS[@]}"; do
         append_unique target_keys "$key"
       done
       ;;
     github:railway)
-      for key in "${RAILWAY_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
+      for key in "${WORKER_ENV_KEYS[@]}"; do
         append_unique target_keys "$key"
       done
       ;;
@@ -305,6 +320,48 @@ build_github_target_keys() {
       exit 1
       ;;
   esac
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_github_control_keys() {
+  local target="$1"
+  local key runtime_key base_array_name
+  local -a target_keys=()
+  local -a runtime_keys=()
+  local -n base_array_ref
+
+  case "$target" in
+    github:vps)
+      base_array_name=VPS_ENV_KEYS
+      ;;
+    github:vercel)
+      base_array_name=VERCEL_ENV_KEYS
+      ;;
+    github:railway)
+      base_array_name=RAILWAY_ENV_KEYS
+      ;;
+    *)
+      printf 'Unsupported GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+
+  mapfile -t runtime_keys < <(build_runtime_target_keys "$target")
+  base_array_ref="$base_array_name"
+
+  for key in "${base_array_ref[@]}"; do
+    local skip=false
+    for runtime_key in "${runtime_keys[@]}"; do
+      if [[ "$key" == "$runtime_key" ]]; then
+        skip=true
+        break
+      fi
+    done
+    if [[ "$skip" == false ]]; then
+      append_unique target_keys "$key"
+    fi
+  done
 
   printf '%s\n' "${target_keys[@]}"
 }
@@ -417,18 +474,37 @@ emit_github_env_payload() {
   done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
 }
 
+build_env_content_payload() {
+  local target="$1"
+  local key value
+  local -a runtime_keys=()
+
+  mapfile -t runtime_keys < <(build_runtime_target_keys "$target")
+
+  for key in "${runtime_keys[@]}"; do
+    value=${ENV_VALUES[$key]:-}
+    [[ -n "$value" ]] || continue
+    printf '%s=%s\n' "$key" "$value"
+  done
+}
+
 sync_github_target() {
   local target="$1"
   local repo="$2"
   local ci_ref="$3"
   local run_ci="$4"
-  local github_env key kind secret_count=0 variable_count=0
-  local -a target_keys=()
+  local github_env key kind secret_count=0 variable_count=0 env_content
+  local -a control_keys=()
 
   github_env=$(github_environment_name "$target")
 
-  mapfile -t target_keys < <(build_github_target_keys "$target")
-  set_target_entries "${target_keys[@]}"
+  mapfile -t control_keys < <(build_github_control_keys "$target")
+  set_target_entries "${control_keys[@]}"
+  env_content=$(build_env_content_payload "$target")
+  if [[ -n "$env_content" ]]; then
+    TARGET_VALUES[ENV_CONTENT]="$env_content"
+    TARGET_KINDS[ENV_CONTENT]=secret
+  fi
 
   if [[ ${#TARGET_VALUES[@]} -eq 0 ]]; then
     printf 'No GitHub values available for %s\n' "$target" >&2
