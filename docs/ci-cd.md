@@ -9,28 +9,45 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
 
-## Sync Script
+## Env Control
 
-Use `scripts/sync-github-env.sh` to push local env values into the GitHub secrets and variables used by these workflows.
+Use `scripts/envctl` to merge root env sources, generate service env files, and sync GitHub secrets and variables.
 
-Default behavior:
+Source files:
 
-- loads `.env.github`, `web-new/.env.local`, `workers/.env`, and `deploy/vps/.env` if they exist
-- syncs exact GitHub names like `VERCEL_TOKEN` and `RAILWAY_PROJECT_ID`
-- maps app env names like `AUTH_SECRET` to workflow names like `VPS_AUTH_SECRET`
-- skips empty values so blank local entries do not wipe GitHub settings
-- triggers `ci.yml` with `workflow_dispatch` after a successful sync
+- `.env.prod`
+- `.env.vps`
+- `.env.vercel`
+- `.env.railway`
+
+Each command takes a comma-separated source list. Later sources override earlier ones.
 
 Examples:
 
 ```bash
-scripts/sync-github-env.sh
-scripts/sync-github-env.sh --dry-run
-scripts/sync-github-env.sh --env-file .env.github --ci-ref main
-scripts/sync-github-env.sh --no-run-ci
+scripts/envctl --input prod,vercel --output web-new/.env
+scripts/envctl --input prod,railway --output workers/.env
+scripts/envctl --input prod,vps --output github:vps
+scripts/envctl --input prod,vercel --output github:vercel
+scripts/envctl --input prod,railway --output github:railway
+scripts/envctl --input prod,vps --output github:vps --run-ci
+scripts/envctl --local
+scripts/envctl --github
 ```
 
-Start from `.env.github.example` if you want one file that holds the GitHub-specific names.
+For `github:*` outputs, `envctl` skips empty values and does not trigger `ci.yml` unless `--run-ci` is passed.
+
+Preset behavior:
+
+- `--local`: generates `web-new/.env` from `prod,vercel` and `workers/.env` from `prod,railway`
+- `--github`: syncs `github:vps`, `github:vercel`, and `github:railway`; add `--run-ci` to trigger `ci.yml` once at the end
+
+Start from these examples:
+
+- `.env.prod.example`
+- `.env.vps.example`
+- `.env.vercel.example`
+- `.env.railway.example`
 
 ## GHCR Images
 
@@ -90,42 +107,44 @@ Required secrets:
 - `VPS_USERNAME`
 - `VPS_SSH_KEY`
 - `GHCR_READ_TOKEN`
-- `VPS_AUTH_SECRET`
-- `VPS_CRON_SECRET`
-- `VPS_POSTGRES_PASSWORD`
-- `VPS_REDIS_PASSWORD`
+- `AUTH_SECRET`
+- `CRON_SECRET`
+- `POSTGRES_PASSWORD`
+- `REDIS_PASSWORD`
 
 Optional secrets, depending on your runtime mode:
 
-- `VPS_DATABASE_URL`
-- `VPS_REDIS_URL`
-- `VPS_MASSIVE_API_KEY`
-- `VPS_BINANCE_API_KEY`
-- `VPS_POLYMARKET_API_KEY`
-- `VPS_GOOGLE_CLIENT_ID`
-- `VPS_GOOGLE_CLIENT_SECRET`
-- `VPS_GITHUB_CLIENT_ID`
-- `VPS_GITHUB_CLIENT_SECRET`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `MASSIVE_API_KEY`
+- `BINANCE_API_KEY`
+- `POLYMARKET_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
 
 Useful variables:
 
 - `VPS_APP_DIR`
 - `VPS_WEB_IMAGE`
 - `VPS_WORKERS_IMAGE`
-- `VPS_NEXT_PUBLIC_APP_URL`
-- `VPS_AUTH_URL`
-- `VPS_DATABASE_SSL`
-- `VPS_MARKET_DATA_MODE`
-- `VPS_COMPETITION_PHASE`
-- `VPS_BRIEFING_WINDOW_MINUTES`
-- `VPS_POSTGRES_DB`
-- `VPS_POSTGRES_USER`
-- `VPS_WORKER_ENABLE_SCHEDULER`
-- `VPS_WORKER_APP_URL`
-- `VPS_BINANCE_ENABLED`
-- `VPS_MASSIVE_ENABLED`
-- `VPS_MASSIVE_SYMBOLS`
-- `VPS_MASSIVE_RECENT_SYMBOL_LIMIT`
+- `NEXT_PUBLIC_APP_URL`
+- `AUTH_URL`
+- `DATABASE_SSL`
+- `AGENTTRADER_MARKET_DATA_MODE`
+- `AGENTTRADER_COMPETITION_PHASE`
+- `AGENTTRADER_BRIEFING_WINDOW_MINUTES`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `WORKER_ENABLE_SCHEDULER`
+- `WORKER_APP_URL`
+- `BINANCE_ENABLED`
+- `BINANCE_BASE_URL`
+- `MASSIVE_ENABLED`
+- `MASSIVE_BASE_URL`
+- `MASSIVE_SYMBOLS`
+- `MASSIVE_RECENT_SYMBOL_LIMIT`
 
 ## Notes
 

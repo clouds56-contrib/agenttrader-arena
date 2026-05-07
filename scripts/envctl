@@ -1,0 +1,555 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$ROOT_DIR"
+
+declare -A ENV_VALUES=()
+declare -A TARGET_VALUES=()
+declare -A TARGET_KINDS=()
+
+SOURCE_NAMES=(prod vps vercel railway)
+
+WEB_ENV_KEYS=(
+  NEXT_PUBLIC_APP_URL
+  AUTH_URL
+  AUTH_SECRET
+  CRON_SECRET
+  AGENTTRADER_COMPETITION_PHASE
+  AGENTTRADER_BRIEFING_WINDOW_MINUTES
+  DATABASE_URL
+  DATABASE_SSL
+  REDIS_URL
+  UPSTASH_REDIS_REST_URL
+  UPSTASH_REDIS_REST_TOKEN
+  GOOGLE_CLIENT_ID
+  GOOGLE_CLIENT_SECRET
+  GITHUB_CLIENT_ID
+  GITHUB_CLIENT_SECRET
+  AGENTTRADER_MARKET_DATA_MODE
+  MASSIVE_API_KEY
+  MASSIVE_BASE_URL
+  BINANCE_BASE_URL
+  BINANCE_API_KEY
+  POLYMARKET_API_KEY
+)
+
+WORKER_ENV_KEYS=(
+  REDIS_URL
+  UPSTASH_REDIS_REST_URL
+  UPSTASH_REDIS_REST_TOKEN
+  BINANCE_ENABLED
+  BINANCE_WS_URL
+  BINANCE_BASE_URL
+  BINANCE_API_KEY
+  MASSIVE_ENABLED
+  MASSIVE_API_KEY
+  MASSIVE_WS_URL
+  MASSIVE_BASE_URL
+  MASSIVE_SYMBOLS
+  MASSIVE_RECENT_SYMBOL_LIMIT
+  WORKER_ENABLE_SCHEDULER
+  WORKER_APP_URL
+  CRON_SECRET
+  NEXT_PUBLIC_APP_URL
+  HTTP_PROXY
+  HTTPS_PROXY
+  ALL_PROXY
+  NO_PROXY
+)
+
+GITHUB_VPS_SECRETS=(
+  VPS_HOST
+  VPS_USERNAME
+  VPS_SSH_KEY
+  GHCR_READ_TOKEN
+  AUTH_SECRET
+  CRON_SECRET
+  POSTGRES_PASSWORD
+  REDIS_PASSWORD
+  DATABASE_URL
+  REDIS_URL
+  MASSIVE_API_KEY
+  BINANCE_API_KEY
+  POLYMARKET_API_KEY
+  GOOGLE_CLIENT_ID
+  GOOGLE_CLIENT_SECRET
+  GITHUB_CLIENT_ID
+  GITHUB_CLIENT_SECRET
+)
+
+GITHUB_VPS_VARS=(
+  ENABLE_VPS_DEPLOY
+  GHCR_USERNAME
+  VPS_APP_DIR
+  VPS_WEB_IMAGE
+  VPS_WORKERS_IMAGE
+  NEXT_PUBLIC_APP_URL
+  AUTH_URL
+  DATABASE_SSL
+  AGENTTRADER_MARKET_DATA_MODE
+  AGENTTRADER_COMPETITION_PHASE
+  AGENTTRADER_BRIEFING_WINDOW_MINUTES
+  POSTGRES_DB
+  POSTGRES_USER
+  WORKER_ENABLE_SCHEDULER
+  WORKER_APP_URL
+  BINANCE_ENABLED
+  BINANCE_BASE_URL
+  MASSIVE_ENABLED
+  MASSIVE_BASE_URL
+  MASSIVE_SYMBOLS
+  MASSIVE_RECENT_SYMBOL_LIMIT
+)
+
+GITHUB_VERCEL_SECRETS=(
+  VERCEL_TOKEN
+)
+
+GITHUB_VERCEL_VARS=(
+  VERCEL_ORG_ID
+  VERCEL_PROJECT_ID
+)
+
+GITHUB_RAILWAY_SECRETS=(
+  RAILWAY_TOKEN
+)
+
+GITHUB_RAILWAY_VARS=(
+  RAILWAY_PROJECT_ID
+  RAILWAY_ENVIRONMENT_ID
+  RAILWAY_WORKERS_SERVICE
+)
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/envctl --input prod,vps --output TARGET [options]
+
+Targets:
+  web-new/.env
+  workers/.env
+  github:vps
+  github:vercel
+  github:railway
+
+Options:
+  --input LIST         Comma-separated source names or file paths.
+  --output TARGET      Output target file path or github target.
+  --local              Preset: write web-new/.env and workers/.env.
+  --github             Preset: sync github:vps, github:vercel, and github:railway.
+  --repo OWNER/REPO    GitHub repository for github:* outputs.
+  --ci-ref REF         Git ref used when triggering CI after github:* sync.
+  --run-ci             Trigger CI after github:* sync.
+  --dry-run            Print what would be written or synced.
+  --help               Show this help.
+
+Examples:
+  scripts/envctl --input prod,vercel --output web-new/.env
+  scripts/envctl --input prod,railway --output workers/.env
+  scripts/envctl --input prod,vps --output github:vps
+  scripts/envctl --local
+  scripts/envctl --github
+EOF
+}
+
+trim() {
+  local value="$1"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  printf '%s' "$value"
+}
+
+strip_quotes() {
+  local value="$1"
+  if [[ ${#value} -ge 2 ]]; then
+    if [[ ${value:0:1} == '"' && ${value: -1} == '"' ]]; then
+      value=${value:1:-1}
+    elif [[ ${value:0:1} == "'" && ${value: -1} == "'" ]]; then
+      value=${value:1:-1}
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+resolve_input_path() {
+  local source="$1"
+  case "$source" in
+    prod|vps|vercel|railway)
+      printf '%s/.env.%s' "$ROOT_DIR" "$source"
+      ;;
+    *)
+      if [[ "$source" = /* ]]; then
+        printf '%s' "$source"
+      else
+        printf '%s/%s' "$ROOT_DIR" "$source"
+      fi
+      ;;
+  esac
+}
+
+load_env_file() {
+  local file="$1"
+  local line key value
+
+  [[ -f "$file" ]] || {
+    printf 'Missing env source: %s\n' "$file" >&2
+    exit 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(trim "$line")
+    [[ -n "$line" ]] || continue
+    [[ ${line:0:1} == '#' ]] && continue
+
+    if [[ $line == export\ * ]]; then
+      line=${line#export }
+      line=$(trim "$line")
+    fi
+
+    [[ $line == *=* ]] || continue
+    key=$(trim "${line%%=*}")
+    value=$(trim "${line#*=}")
+    value=$(strip_quotes "$value")
+
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    ENV_VALUES["$key"]="$value"
+  done < "$file"
+}
+
+has_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_github_cli() {
+  has_command gh || {
+    printf 'Missing required tool: gh\n' >&2
+    exit 1
+  }
+
+  gh auth status >/dev/null 2>&1 || {
+    printf 'GitHub CLI is not authenticated. Run: gh auth login\n' >&2
+    exit 1
+  }
+}
+
+ensure_github_repo() {
+  if [[ "$DRY_RUN" == false ]]; then
+    require_github_cli
+    if [[ -z "$REPO" ]]; then
+      REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+    fi
+  fi
+}
+
+set_target_entries() {
+  local kind="$1"
+  shift
+  local key value
+
+  for key in "$@"; do
+    value=${ENV_VALUES[$key]:-}
+    [[ -n "$value" ]] || continue
+    TARGET_VALUES["$key"]="$value"
+    TARGET_KINDS["$key"]="$kind"
+  done
+}
+
+load_inputs() {
+  local input_spec="$1"
+  local source
+  local -a inputs=()
+
+  ENV_VALUES=()
+  IFS=',' read -r -a inputs <<< "$input_spec"
+
+  for source in "${inputs[@]}"; do
+    source=$(trim "$source")
+    [[ -n "$source" ]] || continue
+    load_env_file "$(resolve_input_path "$source")"
+  done
+}
+
+write_env_file() {
+  local output_path="$1"
+  shift
+  local keys=("$@")
+  local absolute_path="$output_path"
+  local key value count=0 missing_count=0
+
+  if [[ "$absolute_path" != /* ]]; then
+    absolute_path="$ROOT_DIR/$absolute_path"
+  fi
+
+  mkdir -p "$(dirname "$absolute_path")"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] would write %s\n' "$output_path"
+  else
+    : > "$absolute_path"
+  fi
+
+  for key in "${keys[@]}"; do
+    value=${ENV_VALUES[$key]:-}
+    if [[ "$DRY_RUN" == true ]]; then
+      if [[ -n "$value" ]]; then
+        printf '[dry-run] %s\n' "$key"
+      else
+        printf '[dry-run] # %s=\n' "$key"
+      fi
+    else
+      if [[ -n "$value" ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$absolute_path"
+      else
+        printf '# %s=\n' "$key" >> "$absolute_path"
+      fi
+    fi
+    if [[ -n "$value" ]]; then
+      ((count += 1))
+    else
+      ((missing_count += 1))
+    fi
+  done
+
+  if [[ "$DRY_RUN" == false ]]; then
+    printf 'Wrote %d values and %d placeholders to %s\n' "$count" "$missing_count" "$output_path"
+  fi
+}
+
+sync_github_target() {
+  local target="$1"
+  local repo="$2"
+  local ci_ref="$3"
+  local run_ci="$4"
+  local key kind value secret_count=0 variable_count=0
+
+  case "$target" in
+    github:vps)
+      set_target_entries secret "${GITHUB_VPS_SECRETS[@]}"
+      set_target_entries variable "${GITHUB_VPS_VARS[@]}"
+      ;;
+    github:vercel)
+      set_target_entries secret "${GITHUB_VERCEL_SECRETS[@]}"
+      set_target_entries variable "${GITHUB_VERCEL_VARS[@]}"
+      ;;
+    github:railway)
+      set_target_entries secret "${GITHUB_RAILWAY_SECRETS[@]}"
+      set_target_entries variable "${GITHUB_RAILWAY_VARS[@]}"
+      ;;
+    *)
+      printf 'Unsupported GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ ${#TARGET_VALUES[@]} -eq 0 ]]; then
+    printf 'No GitHub values available for %s\n' "$target" >&2
+    exit 1
+  fi
+
+  if [[ "$DRY_RUN" == false && -z "$repo" ]]; then
+    printf 'Missing GitHub repo for %s\n' "$target" >&2
+    exit 1
+  fi
+
+  printf 'Prepared %d GitHub settings for %s\n' "${#TARGET_VALUES[@]}" "$target"
+
+  while IFS= read -r key; do
+    kind=${TARGET_KINDS[$key]}
+    value=${TARGET_VALUES[$key]}
+
+    if [[ "$kind" == secret ]]; then
+      ((secret_count += 1))
+    else
+      ((variable_count += 1))
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] %s %s\n' "$kind" "$key"
+      continue
+    fi
+
+    printf 'Updating %s %s\n' "$kind" "$key"
+    if [[ "$kind" == secret ]]; then
+      printf '%s' "$value" | gh secret set "$key" --repo "$repo" --body -
+    else
+      gh variable set "$key" --repo "$repo" --body "$value"
+    fi
+  done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
+
+  printf 'Synced %d secrets and %d variables\n' "$secret_count" "$variable_count"
+
+  if [[ "$run_ci" == false ]]; then
+    return 0
+  fi
+
+  trigger_ci "$repo" "$ci_ref"
+}
+
+trigger_ci() {
+  local repo="$1"
+  local ci_ref="$2"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] would trigger workflow ci.yml on ref %s\n' "$ci_ref"
+    return 0
+  fi
+
+  printf 'Triggering CI workflow on ref %s\n' "$ci_ref"
+  gh workflow run ci.yml --repo "$repo" --ref "$ci_ref"
+}
+
+INPUT_SPEC=""
+OUTPUT_TARGET=""
+REPO=""
+CI_REF=""
+RUN_CI=false
+DRY_RUN=false
+LOCAL_PRESET=false
+GITHUB_PRESET=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --input)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --input\n' >&2
+        exit 1
+      }
+      INPUT_SPEC="$2"
+      shift 2
+      ;;
+    --output)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --output\n' >&2
+        exit 1
+      }
+      OUTPUT_TARGET="$2"
+      shift 2
+      ;;
+    --local)
+      LOCAL_PRESET=true
+      shift
+      ;;
+    --github)
+      GITHUB_PRESET=true
+      shift
+      ;;
+    --repo)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --repo\n' >&2
+        exit 1
+      }
+      REPO="$2"
+      shift 2
+      ;;
+    --ci-ref)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --ci-ref\n' >&2
+        exit 1
+      }
+      CI_REF="$2"
+      shift 2
+      ;;
+    --run-ci)
+      RUN_CI=true
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$LOCAL_PRESET" == true && "$GITHUB_PRESET" == true ]]; then
+  printf '%s\n' '--local and --github cannot be used together' >&2
+  exit 1
+fi
+
+if [[ "$LOCAL_PRESET" == true || "$GITHUB_PRESET" == true ]]; then
+  if [[ -n "$INPUT_SPEC" || -n "$OUTPUT_TARGET" ]]; then
+    printf '%s\n' 'preset flags cannot be combined with --input or --output' >&2
+    exit 1
+  fi
+fi
+
+if [[ "$LOCAL_PRESET" == false && "$GITHUB_PRESET" == false ]]; then
+  [[ -n "$INPUT_SPEC" ]] || {
+    printf '%s: %s\n' "$0" '--input is required' >&2
+    exit 1
+  }
+
+  [[ -n "$OUTPUT_TARGET" ]] || {
+    printf '%s: %s\n' "$0" '--output is required' >&2
+    exit 1
+  }
+fi
+
+if [[ -z "$CI_REF" ]]; then
+  CI_REF=$(git branch --show-current 2>/dev/null || true)
+  CI_REF=${CI_REF:-main}
+fi
+
+if [[ "$LOCAL_PRESET" == true ]]; then
+  load_inputs 'prod,vercel'
+  write_env_file 'web-new/.env' "${WEB_ENV_KEYS[@]}"
+
+  load_inputs 'prod,railway'
+  write_env_file 'workers/.env' "${WORKER_ENV_KEYS[@]}"
+  exit 0
+fi
+
+if [[ "$GITHUB_PRESET" == true ]]; then
+  ensure_github_repo
+
+  load_inputs 'prod,vps'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:vps' "$REPO" "$CI_REF" false
+
+  load_inputs 'prod,vercel'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:vercel' "$REPO" "$CI_REF" false
+
+  load_inputs 'prod,railway'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:railway' "$REPO" "$CI_REF" false
+
+  if [[ "$RUN_CI" == true ]]; then
+    trigger_ci "$REPO" "$CI_REF"
+  fi
+  exit 0
+fi
+
+load_inputs "$INPUT_SPEC"
+
+if [[ "$OUTPUT_TARGET" == github:* ]]; then
+  ensure_github_repo
+fi
+
+case "$OUTPUT_TARGET" in
+  github:*)
+    sync_github_target "$OUTPUT_TARGET" "$REPO" "$CI_REF" "$RUN_CI"
+    ;;
+  web-new/.env|*/web-new/.env)
+    write_env_file "$OUTPUT_TARGET" "${WEB_ENV_KEYS[@]}"
+    ;;
+  workers/.env|*/workers/.env)
+    write_env_file "$OUTPUT_TARGET" "${WORKER_ENV_KEYS[@]}"
+    ;;
+  *)
+    printf 'Unsupported output target: %s\n' "$OUTPUT_TARGET" >&2
+    exit 1
+    ;;
+esac

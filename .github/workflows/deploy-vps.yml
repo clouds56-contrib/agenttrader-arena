@@ -43,35 +43,35 @@ jobs:
           WEB_IMAGE: ${{ vars.VPS_WEB_IMAGE || format('ghcr.io/{0}/agenttrader-web-new', github.repository_owner) }}
           WORKERS_IMAGE: ${{ vars.VPS_WORKERS_IMAGE || format('ghcr.io/{0}/agenttrader-workers', github.repository_owner) }}
           IMAGE_TAG: ${{ github.event.inputs.image_tag || 'main' }}
-          NEXT_PUBLIC_APP_URL: ${{ vars.VPS_NEXT_PUBLIC_APP_URL }}
-          AUTH_URL: ${{ vars.VPS_AUTH_URL }}
-          AUTH_SECRET: ${{ secrets.VPS_AUTH_SECRET }}
-          CRON_SECRET: ${{ secrets.VPS_CRON_SECRET }}
-          DATABASE_URL: ${{ secrets.VPS_DATABASE_URL }}
-          DATABASE_SSL: ${{ vars.VPS_DATABASE_SSL || 'false' }}
-          REDIS_URL: ${{ secrets.VPS_REDIS_URL }}
-          AGENTTRADER_MARKET_DATA_MODE: ${{ vars.VPS_MARKET_DATA_MODE || 'auto' }}
-          AGENTTRADER_COMPETITION_PHASE: ${{ vars.VPS_COMPETITION_PHASE || 'official' }}
-          AGENTTRADER_BRIEFING_WINDOW_MINUTES: ${{ vars.VPS_BRIEFING_WINDOW_MINUTES || '15' }}
-          MASSIVE_API_KEY: ${{ secrets.VPS_MASSIVE_API_KEY }}
-          MASSIVE_BASE_URL: ${{ vars.VPS_MASSIVE_BASE_URL || 'https://api.massive.com' }}
-          BINANCE_API_KEY: ${{ secrets.VPS_BINANCE_API_KEY }}
-          BINANCE_BASE_URL: ${{ vars.VPS_BINANCE_BASE_URL || 'https://api.binance.us' }}
-          POLYMARKET_API_KEY: ${{ secrets.VPS_POLYMARKET_API_KEY }}
-          GOOGLE_CLIENT_ID: ${{ secrets.VPS_GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.VPS_GOOGLE_CLIENT_SECRET }}
-          GITHUB_CLIENT_ID: ${{ secrets.VPS_GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.VPS_GITHUB_CLIENT_SECRET }}
-          REDIS_PASSWORD: ${{ secrets.VPS_REDIS_PASSWORD }}
-          POSTGRES_DB: ${{ vars.VPS_POSTGRES_DB || 'agentrader' }}
-          POSTGRES_USER: ${{ vars.VPS_POSTGRES_USER || 'agentrader' }}
-          POSTGRES_PASSWORD: ${{ secrets.VPS_POSTGRES_PASSWORD }}
-          WORKER_ENABLE_SCHEDULER: ${{ vars.VPS_WORKER_ENABLE_SCHEDULER || 'true' }}
-          WORKER_APP_URL: ${{ vars.VPS_WORKER_APP_URL || 'http://web:8080' }}
-          BINANCE_ENABLED: ${{ vars.VPS_BINANCE_ENABLED || 'true' }}
-          MASSIVE_ENABLED: ${{ vars.VPS_MASSIVE_ENABLED || 'true' }}
-          MASSIVE_SYMBOLS: ${{ vars.VPS_MASSIVE_SYMBOLS || 'AAPL,MSFT,NVDA,TSLA,AMZN' }}
-          MASSIVE_RECENT_SYMBOL_LIMIT: ${{ vars.VPS_MASSIVE_RECENT_SYMBOL_LIMIT || '8' }}
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+          AUTH_URL: ${{ vars.AUTH_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_SSL: ${{ vars.DATABASE_SSL || 'false' }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          AGENTTRADER_MARKET_DATA_MODE: ${{ vars.AGENTTRADER_MARKET_DATA_MODE || 'auto' }}
+          AGENTTRADER_COMPETITION_PHASE: ${{ vars.AGENTTRADER_COMPETITION_PHASE || 'official' }}
+          AGENTTRADER_BRIEFING_WINDOW_MINUTES: ${{ vars.AGENTTRADER_BRIEFING_WINDOW_MINUTES || '15' }}
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          MASSIVE_BASE_URL: ${{ vars.MASSIVE_BASE_URL || 'https://api.massive.com' }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_BASE_URL: ${{ vars.BINANCE_BASE_URL || 'https://api.binance.us' }}
+          POLYMARKET_API_KEY: ${{ secrets.POLYMARKET_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB || 'agentrader' }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER || 'agentrader' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          WORKER_ENABLE_SCHEDULER: ${{ vars.WORKER_ENABLE_SCHEDULER || 'true' }}
+          WORKER_APP_URL: ${{ vars.WORKER_APP_URL || 'http://web:8080' }}
+          BINANCE_ENABLED: ${{ vars.BINANCE_ENABLED || 'true' }}
+          MASSIVE_ENABLED: ${{ vars.MASSIVE_ENABLED || 'true' }}
+          MASSIVE_SYMBOLS: ${{ vars.MASSIVE_SYMBOLS || 'AAPL,MSFT,NVDA,TSLA,AMZN' }}
+          MASSIVE_RECENT_SYMBOL_LIMIT: ${{ vars.MASSIVE_RECENT_SYMBOL_LIMIT || '8' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
