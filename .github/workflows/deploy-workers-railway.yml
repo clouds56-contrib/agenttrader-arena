@@ -87,7 +87,7 @@ jobs:
             case "$line" in
               \#*) continue ;;
             esac
-            railway variables --set "$line" --service "$RAILWAY_WORKERS_SERVICE"
+            railway variable set "$line" --service "$RAILWAY_WORKERS_SERVICE" --environment "$RAILWAY_ENVIRONMENT_ID" --skip-deploys >/dev/null
           done <<EOF
           $ENV_CONTENT
           EOF

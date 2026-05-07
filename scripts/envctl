@@ -6,9 +6,6 @@ ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 cd "$ROOT_DIR"
 
 declare -A ENV_VALUES=()
-declare -A TARGET_VALUES=()
-declare -A TARGET_KINDS=()
-
 declare -a WEB_ENV_KEYS=()
 declare -a WORKER_ENV_KEYS=()
 declare -a VPS_ENV_KEYS=()
@@ -265,22 +262,6 @@ github_environment_name() {
   esac
 }
 
-set_target_entries() {
-  local key value kind
-
-  for key in "$@"; do
-    value=${ENV_VALUES[$key]:-}
-    [[ -n "$value" ]] || continue
-    TARGET_VALUES["$key"]="$value"
-    if is_secret_key "$key"; then
-      kind=secret
-    else
-      kind=variable
-    fi
-    TARGET_KINDS["$key"]="$kind"
-  done
-}
-
 build_github_target_keys() {
   local target="$1"
   local key
@@ -462,16 +443,35 @@ write_env_file() {
   fi
 }
 
-emit_github_env_payload() {
-  local kind="$1"
-  local key value
+build_github_value_keys() {
+  local target="$1"
+  local key
+  local -a value_keys=()
 
   while IFS= read -r key; do
-    [[ ${TARGET_KINDS[$key]:-} == "$kind" ]] || continue
-    value=${TARGET_VALUES[$key]:-}
+    [[ -n "$key" ]] || continue
+    [[ -n ${ENV_VALUES[$key]:-} ]] || continue
+    append_unique value_keys "$key"
+  done < <(build_github_control_keys "$target")
+
+  printf '%s\n' "${value_keys[@]}"
+}
+
+emit_github_env_payload() {
+  local kind="$1"
+  shift
+  local key value
+
+  for key in "$@"; do
+    value=${ENV_VALUES[$key]:-}
     [[ -n "$value" ]] || continue
+    if [[ "$kind" == secret ]]; then
+      is_secret_key "$key" || continue
+    else
+      is_secret_key "$key" && continue
+    fi
     printf '%s=%s\n' "$key" "$value"
-  done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
+  done
 }
 
 build_env_content_payload() {
@@ -493,20 +493,15 @@ sync_github_target() {
   local repo="$2"
   local ci_ref="$3"
   local run_ci="$4"
-  local github_env key kind secret_count=0 variable_count=0 env_content
-  local -a control_keys=()
+  local github_env key kind secret_count=0 variable_count=0 prepared_count env_content
+  local -a value_keys=()
 
   github_env=$(github_environment_name "$target")
 
-  mapfile -t control_keys < <(build_github_control_keys "$target")
-  set_target_entries "${control_keys[@]}"
+  mapfile -t value_keys < <(build_github_value_keys "$target")
   env_content=$(build_env_content_payload "$target")
-  if [[ -n "$env_content" ]]; then
-    TARGET_VALUES[ENV_CONTENT]="$env_content"
-    TARGET_KINDS[ENV_CONTENT]=secret
-  fi
 
-  if [[ ${#TARGET_VALUES[@]} -eq 0 ]]; then
+  if [[ ${#value_keys[@]} -eq 0 && -z "$env_content" ]]; then
     printf 'No GitHub values available for %s\n' "$target" >&2
     exit 1
   fi
@@ -516,31 +511,48 @@ sync_github_target() {
     exit 1
   fi
 
-  printf 'Prepared %d GitHub settings for %s (%s environment)\n' "${#TARGET_VALUES[@]}" "$target" "$github_env"
+  prepared_count=${#value_keys[@]}
+  if [[ -n "$env_content" ]]; then
+    ((prepared_count += 1))
+  fi
 
-  while IFS= read -r key; do
-    kind=${TARGET_KINDS[$key]}
+  printf 'Prepared %d GitHub settings for %s (%s environment)\n' "$prepared_count" "$target" "$github_env"
 
-    if [[ "$kind" == secret ]]; then
+  for key in "${value_keys[@]}"; do
+    if is_secret_key "$key"; then
+      kind=secret
       ((secret_count += 1))
     else
+      kind=variable
       ((variable_count += 1))
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
       printf '[dry-run] %s %s --env %s\n' "$kind" "$key" "$github_env"
     fi
-  done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
+  done
+
+  if [[ -n "$env_content" ]]; then
+    ((secret_count += 1))
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] secret ENV_CONTENT --env %s\n' "$github_env"
+    fi
+  fi
 
   if [[ "$DRY_RUN" == false ]]; then
     if [[ "$secret_count" -gt 0 ]]; then
       printf 'Updating %d secrets in %s\n' "$secret_count" "$github_env"
-      emit_github_env_payload secret | gh secret set -f - --repo "$repo" --env "$github_env"
+      if [[ ${#value_keys[@]} -gt 0 ]]; then
+        emit_github_env_payload secret "${value_keys[@]}" | gh secret set -f - --repo "$repo" --env "$github_env"
+      fi
+      if [[ -n "$env_content" ]]; then
+        printf '%s' "$env_content" | gh secret set ENV_CONTENT --repo "$repo" --env "$github_env"
+      fi
     fi
 
     if [[ "$variable_count" -gt 0 ]]; then
       printf 'Updating %d variables in %s\n' "$variable_count" "$github_env"
-      emit_github_env_payload variable | gh variable set -f - --repo "$repo" --env "$github_env"
+      emit_github_env_payload variable "${value_keys[@]}" | gh variable set -f - --repo "$repo" --env "$github_env"
     fi
   fi
 
