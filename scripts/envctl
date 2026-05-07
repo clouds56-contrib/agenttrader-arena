@@ -335,12 +335,24 @@ write_env_file() {
   fi
 }
 
+emit_github_env_payload() {
+  local kind="$1"
+  local key value
+
+  while IFS= read -r key; do
+    [[ ${TARGET_KINDS[$key]:-} == "$kind" ]] || continue
+    value=${TARGET_VALUES[$key]:-}
+    [[ -n "$value" ]] || continue
+    printf '%s=%s\n' "$key" "$value"
+  done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
+}
+
 sync_github_target() {
   local target="$1"
   local repo="$2"
   local ci_ref="$3"
   local run_ci="$4"
-  local github_env key kind value secret_count=0 variable_count=0
+  local github_env key kind secret_count=0 variable_count=0
 
   github_env=$(github_environment_name "$target")
 
@@ -377,7 +389,6 @@ sync_github_target() {
 
   while IFS= read -r key; do
     kind=${TARGET_KINDS[$key]}
-    value=${TARGET_VALUES[$key]}
 
     if [[ "$kind" == secret ]]; then
       ((secret_count += 1))
@@ -387,16 +398,20 @@ sync_github_target() {
 
     if [[ "$DRY_RUN" == true ]]; then
       printf '[dry-run] %s %s --env %s\n' "$kind" "$key" "$github_env"
-      continue
-    fi
-
-    printf 'Updating %s %s in %s\n' "$kind" "$key" "$github_env"
-    if [[ "$kind" == secret ]]; then
-      printf '%s' "$value" | gh secret set "$key" --repo "$repo" --env "$github_env" --body -
-    else
-      gh variable set "$key" --repo "$repo" --env "$github_env" --body "$value"
     fi
   done < <(printf '%s\n' "${!TARGET_VALUES[@]}" | sort)
+
+  if [[ "$DRY_RUN" == false ]]; then
+    if [[ "$secret_count" -gt 0 ]]; then
+      printf 'Updating %d secrets in %s\n' "$secret_count" "$github_env"
+      emit_github_env_payload secret | gh secret set -f - --repo "$repo" --env "$github_env"
+    fi
+
+    if [[ "$variable_count" -gt 0 ]]; then
+      printf 'Updating %d variables in %s\n' "$variable_count" "$github_env"
+      emit_github_env_payload variable | gh variable set -f - --repo "$repo" --env "$github_env"
+    fi
+  fi
 
   printf 'Synced %d secrets and %d variables\n' "$secret_count" "$variable_count"
 

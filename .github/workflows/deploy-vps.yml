@@ -122,6 +122,8 @@ jobs:
             MASSIVE_SYMBOLS=$MASSIVE_SYMBOLS
             MASSIVE_RECENT_SYMBOL_LIMIT=$MASSIVE_RECENT_SYMBOL_LIMIT
             EOF
-            echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            if [ -n "$GHCR_READ_TOKEN" ]; then
+              echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
             docker compose --env-file .env -f docker-compose.yml pull
             docker compose --env-file .env -f docker-compose.yml up -d
