@@ -4,7 +4,7 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 
 ## Workflows
 
-- `CI`: runs `web-new` tests and build; runs `workers` tests; builds Docker images for both services; pushes images to GHCR on `main`
+- `CI`: runs `web-new` tests and build; runs `workers` tests; builds Docker images for both services; uploads Docker tarball artifacts for both services; pushes images to GHCR on `main`
 - `Deploy Workers to Railway`: deploys `workers/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
@@ -40,6 +40,20 @@ The CI workflow publishes these images on `main`:
 - `ghcr.io/<owner>/agentrader-web-new:sha-<short-sha>`
 - `ghcr.io/<owner>/agentrader-workers:main`
 - `ghcr.io/<owner>/agentrader-workers:sha-<short-sha>`
+
+## Docker Artifacts
+
+Each CI run also uploads Docker image tarballs as GitHub Actions artifacts:
+
+- `docker-image-web-new`
+- `docker-image-workers`
+
+You can load them locally or on a server with:
+
+```bash
+docker load -i docker-image-web-new.tar
+docker load -i docker-image-workers.tar
+```
 
 ## GitHub Secrets And Variables
 
