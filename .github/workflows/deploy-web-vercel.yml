@@ -45,10 +45,16 @@ jobs:
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
       - uses: actions/setup-node@v4
-        if: steps.config.outputs.configured == 'true'
         with:
           node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-new/pnpm-lock.yaml
 
       - name: Install Vercel CLI
         if: steps.config.outputs.configured == 'true'
