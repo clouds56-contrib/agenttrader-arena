@@ -9,61 +9,20 @@ declare -A ENV_VALUES=()
 declare -A TARGET_VALUES=()
 declare -A TARGET_KINDS=()
 
-SOURCE_NAMES=(prod vps vercel railway)
+declare -a WEB_ENV_KEYS=()
+declare -a WORKER_ENV_KEYS=()
+declare -a VPS_ENV_KEYS=()
+declare -a VERCEL_ENV_KEYS=()
+declare -a RAILWAY_ENV_KEYS=()
 
-WEB_ENV_KEYS=(
-  NEXT_PUBLIC_APP_URL
-  AUTH_URL
-  AUTH_SECRET
-  CRON_SECRET
-  AGENTTRADER_COMPETITION_PHASE
-  AGENTTRADER_BRIEFING_WINDOW_MINUTES
-  DATABASE_URL
-  DATABASE_SSL
-  REDIS_URL
-  UPSTASH_REDIS_REST_URL
-  UPSTASH_REDIS_REST_TOKEN
-  GOOGLE_CLIENT_ID
-  GOOGLE_CLIENT_SECRET
-  GITHUB_CLIENT_ID
-  GITHUB_CLIENT_SECRET
-  AGENTTRADER_MARKET_DATA_MODE
-  MASSIVE_API_KEY
-  MASSIVE_BASE_URL
-  BINANCE_BASE_URL
-  BINANCE_API_KEY
-  POLYMARKET_API_KEY
-)
-
-WORKER_ENV_KEYS=(
-  REDIS_URL
-  UPSTASH_REDIS_REST_URL
-  UPSTASH_REDIS_REST_TOKEN
-  BINANCE_ENABLED
-  BINANCE_WS_URL
-  BINANCE_BASE_URL
-  BINANCE_API_KEY
-  MASSIVE_ENABLED
-  MASSIVE_API_KEY
-  MASSIVE_WS_URL
-  MASSIVE_BASE_URL
-  MASSIVE_SYMBOLS
-  MASSIVE_RECENT_SYMBOL_LIMIT
-  WORKER_ENABLE_SCHEDULER
-  WORKER_APP_URL
-  CRON_SECRET
-  NEXT_PUBLIC_APP_URL
-  HTTP_PROXY
-  HTTPS_PROXY
-  ALL_PROXY
-  NO_PROXY
-)
-
-GITHUB_VPS_SECRETS=(
+SECRETS_KEYS=(
   VPS_HOST
   VPS_USERNAME
   VPS_SSH_KEY
   GHCR_READ_TOKEN
+  UPSTASH_REDIS_REST_TOKEN
+  VERCEL_TOKEN
+  RAILWAY_TOKEN
   AUTH_SECRET
   CRON_SECRET
   POSTGRES_PASSWORD
@@ -77,49 +36,6 @@ GITHUB_VPS_SECRETS=(
   GOOGLE_CLIENT_SECRET
   GITHUB_CLIENT_ID
   GITHUB_CLIENT_SECRET
-)
-
-GITHUB_VPS_VARS=(
-  ENABLE_VPS_DEPLOY
-  GHCR_USERNAME
-  VPS_APP_DIR
-  VPS_WEB_IMAGE
-  VPS_WORKERS_IMAGE
-  NEXT_PUBLIC_APP_URL
-  AUTH_URL
-  DATABASE_SSL
-  AGENTTRADER_MARKET_DATA_MODE
-  AGENTTRADER_COMPETITION_PHASE
-  AGENTTRADER_BRIEFING_WINDOW_MINUTES
-  POSTGRES_DB
-  POSTGRES_USER
-  WORKER_ENABLE_SCHEDULER
-  WORKER_APP_URL
-  BINANCE_ENABLED
-  BINANCE_BASE_URL
-  MASSIVE_ENABLED
-  MASSIVE_BASE_URL
-  MASSIVE_SYMBOLS
-  MASSIVE_RECENT_SYMBOL_LIMIT
-)
-
-GITHUB_VERCEL_SECRETS=(
-  VERCEL_TOKEN
-)
-
-GITHUB_VERCEL_VARS=(
-  VERCEL_ORG_ID
-  VERCEL_PROJECT_ID
-)
-
-GITHUB_RAILWAY_SECRETS=(
-  RAILWAY_TOKEN
-)
-
-GITHUB_RAILWAY_VARS=(
-  RAILWAY_PROJECT_ID
-  RAILWAY_ENVIRONMENT_ID
-  RAILWAY_WORKERS_SERVICE
 )
 
 usage() {
@@ -136,6 +52,7 @@ Targets:
 Options:
   --input LIST         Comma-separated source names or file paths.
   --output TARGET      Output target file path or github target.
+  --show-keys          Print target keys and classification without reading inputs or writing anything.
   --local              Preset: write web-new/.env and workers/.env.
   --github             Preset: sync github:vps, github:vercel, and github:railway.
   --repo OWNER/REPO    GitHub repository for github:* outputs.
@@ -148,6 +65,7 @@ Examples:
   scripts/envctl --input prod,vercel --output web-new/.env
   scripts/envctl --input prod,railway --output workers/.env
   scripts/envctl --input prod,vps --output github:vps
+  scripts/envctl --output github:vps --show-keys
   scripts/envctl --local
   scripts/envctl --github
 EOF
@@ -158,6 +76,39 @@ trim() {
   value="${value#${value%%[![:space:]]*}}"
   value="${value%${value##*[![:space:]]}}"
   printf '%s' "$value"
+}
+
+array_contains() {
+  local array_name="$1"
+  local needle="$2"
+  local item
+  local -n array_ref="$array_name"
+
+  for item in "${array_ref[@]}"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+
+  return 1
+}
+
+append_unique() {
+  local array_name="$1"
+  local value="$2"
+  local -n array_ref="$array_name"
+
+  array_contains "$array_name" "$value" || array_ref+=("$value")
+}
+
+is_secret_key() {
+  local key="$1"
+  local lowered
+
+  if array_contains SECRETS_KEYS "$key"; then
+    return 0
+  fi
+
+  lowered=$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')
+  [[ "$lowered" == *secret* || "$lowered" == *password* || "$lowered" == *key* || "$lowered" == *token* ]]
 }
 
 strip_quotes() {
@@ -217,6 +168,57 @@ load_env_file() {
   done < "$file"
 }
 
+extract_env_keys_from_example() {
+  local file="$1"
+  local line normalized key
+
+  [[ -f "$file" ]] || {
+    printf 'Missing env example: %s\n' "$file" >&2
+    exit 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(trim "$line")
+    [[ -n "$line" ]] || continue
+
+    normalized="$line"
+    if [[ ${normalized:0:1} == '#' ]]; then
+      normalized=${normalized#\#}
+      normalized=$(trim "$normalized")
+    fi
+
+    [[ $normalized == *=* ]] || continue
+    [[ $normalized =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    key=$(trim "${normalized%%=*}")
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    printf '%s\n' "$key"
+  done < "$file"
+}
+
+load_keys_from_example() {
+  local file="$1"
+  local array_name="$2"
+  local key
+
+  while IFS= read -r key; do
+    append_unique "$array_name" "$key"
+  done < <(extract_env_keys_from_example "$file")
+}
+
+init_key_sets() {
+  WEB_ENV_KEYS=()
+  WORKER_ENV_KEYS=()
+  VPS_ENV_KEYS=()
+  VERCEL_ENV_KEYS=()
+  RAILWAY_ENV_KEYS=()
+
+  load_keys_from_example "$ROOT_DIR/web-new/.env.example" WEB_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/workers/.env.example" WORKER_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.vps.example" VPS_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.vercel.example" VERCEL_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.railway.example" RAILWAY_ENV_KEYS
+}
+
 has_command() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -262,16 +264,84 @@ github_environment_name() {
 }
 
 set_target_entries() {
-  local kind="$1"
-  shift
-  local key value
+  local key value kind
 
   for key in "$@"; do
     value=${ENV_VALUES[$key]:-}
     [[ -n "$value" ]] || continue
     TARGET_VALUES["$key"]="$value"
+    if is_secret_key "$key"; then
+      kind=secret
+    else
+      kind=variable
+    fi
     TARGET_KINDS["$key"]="$kind"
   done
+}
+
+build_github_target_keys() {
+  local target="$1"
+  local key
+  local -a target_keys=()
+
+  case "$target" in
+    github:vps)
+      for key in "${VPS_ENV_KEYS[@]}" "${WEB_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    github:vercel)
+      for key in "${VERCEL_ENV_KEYS[@]}" "${WEB_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    github:railway)
+      for key in "${RAILWAY_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    *)
+      printf 'Unsupported GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_output_target_keys() {
+  local target="$1"
+
+  case "$target" in
+    github:*)
+      build_github_target_keys "$target"
+      ;;
+    web-new/.env|*/web-new/.env)
+      printf '%s\n' "${WEB_ENV_KEYS[@]}"
+      ;;
+    workers/.env|*/workers/.env)
+      printf '%s\n' "${WORKER_ENV_KEYS[@]}"
+      ;;
+    *)
+      printf 'Unsupported output target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+}
+
+show_target_keys() {
+  local target="$1"
+  local key kind
+
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    if is_secret_key "$key"; then
+      kind=secret
+    else
+      kind=variable
+    fi
+    printf '%s %s\n' "$kind" "$key"
+  done < <(build_output_target_keys "$target")
 }
 
 load_inputs() {
@@ -353,27 +423,12 @@ sync_github_target() {
   local ci_ref="$3"
   local run_ci="$4"
   local github_env key kind secret_count=0 variable_count=0
+  local -a target_keys=()
 
   github_env=$(github_environment_name "$target")
 
-  case "$target" in
-    github:vps)
-      set_target_entries secret "${GITHUB_VPS_SECRETS[@]}"
-      set_target_entries variable "${GITHUB_VPS_VARS[@]}"
-      ;;
-    github:vercel)
-      set_target_entries secret "${GITHUB_VERCEL_SECRETS[@]}"
-      set_target_entries variable "${GITHUB_VERCEL_VARS[@]}"
-      ;;
-    github:railway)
-      set_target_entries secret "${GITHUB_RAILWAY_SECRETS[@]}"
-      set_target_entries variable "${GITHUB_RAILWAY_VARS[@]}"
-      ;;
-    *)
-      printf 'Unsupported GitHub target: %s\n' "$target" >&2
-      exit 1
-      ;;
-  esac
+  mapfile -t target_keys < <(build_github_target_keys "$target")
+  set_target_entries "${target_keys[@]}"
 
   if [[ ${#TARGET_VALUES[@]} -eq 0 ]]; then
     printf 'No GitHub values available for %s\n' "$target" >&2
@@ -441,8 +496,11 @@ REPO=""
 CI_REF=""
 RUN_CI=false
 DRY_RUN=false
+SHOW_KEYS=false
 LOCAL_PRESET=false
 GITHUB_PRESET=false
+
+init_key_sets
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -461,6 +519,10 @@ while [[ $# -gt 0 ]]; do
       }
       OUTPUT_TARGET="$2"
       shift 2
+      ;;
+    --show-keys)
+      SHOW_KEYS=true
+      shift
       ;;
     --local)
       LOCAL_PRESET=true
@@ -512,10 +574,20 @@ if [[ "$LOCAL_PRESET" == true && "$GITHUB_PRESET" == true ]]; then
 fi
 
 if [[ "$LOCAL_PRESET" == true || "$GITHUB_PRESET" == true ]]; then
-  if [[ -n "$INPUT_SPEC" || -n "$OUTPUT_TARGET" ]]; then
+  if [[ -n "$INPUT_SPEC" || -n "$OUTPUT_TARGET" || "$SHOW_KEYS" == true ]]; then
     printf '%s\n' 'preset flags cannot be combined with --input or --output' >&2
     exit 1
   fi
+fi
+
+if [[ "$SHOW_KEYS" == true ]]; then
+  [[ -n "$OUTPUT_TARGET" ]] || {
+    printf '%s: %s\n' "$0" '--output is required with --show-keys' >&2
+    exit 1
+  }
+
+  show_target_keys "$OUTPUT_TARGET"
+  exit 0
 fi
 
 if [[ "$LOCAL_PRESET" == false && "$GITHUB_PRESET" == false ]]; then

@@ -13,6 +13,20 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 
 Use `scripts/envctl` to merge root env sources, generate service env files, and sync GitHub Environment-scoped secrets and variables.
 
+`envctl` derives service keys from:
+
+- `web-new/.env.example`
+- `workers/.env.example`
+
+GitHub target keys are deduplicated unions:
+
+- `github:vps` = `.env.vps` + `web-new` + `workers`
+- `github:vercel` = `.env.vercel` + `web-new`
+- `github:railway` = `.env.railway` + `workers`
+
+Secret vs variable classification is controlled by one central `SECRETS_KEYS` list inside `scripts/envctl`.
+Keys that contain `secret`, `password`, `key`, or `token` are also treated as secrets by heuristic unless you override that by changing the script.
+
 Source files:
 
 - `.env.prod`
@@ -31,9 +45,12 @@ scripts/envctl --input prod,vps --output github:vps
 scripts/envctl --input prod,vercel --output github:vercel
 scripts/envctl --input prod,railway --output github:railway
 scripts/envctl --input prod,vps --output github:vps --run-ci
+scripts/envctl --output github:vps --show-keys
 scripts/envctl --local
 scripts/envctl --github
 ```
+
+Use `--show-keys` to inspect the resolved target key list and whether each key is classified as `secret` or `variable`. When `--show-keys` is used, `envctl` only prints keys and does not read input values, write files, sync GitHub settings, or trigger CI.
 
 For `github:*` outputs, `envctl` skips empty values and writes to GitHub Environments named `vps`, `vercel`, and `railway`. It batches each target into one `gh secret set -f -` call and one `gh variable set -f -` call. It does not trigger `ci.yml` unless `--run-ci` is passed.
 
