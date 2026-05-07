@@ -9,6 +9,29 @@ This repository now includes GitHub Actions workflows for CI, Docker image publi
 - `Deploy Web to Vercel`: deploys `web-new/` after CI succeeds on `main`, or manually with `workflow_dispatch`
 - `Deploy Full Stack to VPS`: manual-only deployment of `web-new`, `workers`, `postgres`, and `redis`; disabled unless `ENABLE_VPS_DEPLOY=true`
 
+## Sync Script
+
+Use `scripts/sync-github-env.sh` to push local env values into the GitHub secrets and variables used by these workflows.
+
+Default behavior:
+
+- loads `.env.github`, `web-new/.env.local`, `workers/.env`, and `deploy/vps/.env` if they exist
+- syncs exact GitHub names like `VERCEL_TOKEN` and `RAILWAY_PROJECT_ID`
+- maps app env names like `AUTH_SECRET` to workflow names like `VPS_AUTH_SECRET`
+- skips empty values so blank local entries do not wipe GitHub settings
+- triggers `ci.yml` with `workflow_dispatch` after a successful sync
+
+Examples:
+
+```bash
+scripts/sync-github-env.sh
+scripts/sync-github-env.sh --dry-run
+scripts/sync-github-env.sh --env-file .env.github --ci-ref main
+scripts/sync-github-env.sh --no-run-ci
+```
+
+Start from `.env.github.example` if you want one file that holds the GitHub-specific names.
+
 ## GHCR Images
 
 The CI workflow publishes these images on `main`:
