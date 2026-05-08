@@ -78,7 +78,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/agentrader_sdk_test
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/agenttrader_sdk_test
       NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
       AUTH_URL: http://127.0.0.1:3100
       AUTH_SECRET: ci-auth-secret
