@@ -9,7 +9,10 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test:integration": "npm run build && node tests/live-integration.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "npm run build && vitest run tests/live-integration.test.ts --reporter=verbose",
+    "test:integration:update": "npm run build && vitest run tests/live-integration.test.ts --reporter=verbose -u",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -22,7 +25,8 @@
   "license": "MIT",
   "devDependencies": {
     "postgres": "^3.4.7",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=18.0.0"
