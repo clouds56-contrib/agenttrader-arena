@@ -238,10 +238,9 @@ export const positionSchema = validate<Position>(
       avg_price: numericLikeSchema.optional(),
       market_price: numericLikeSchema.optional(),
       market_value: numericLikeSchema.optional(),
-      quantity: numericLikeSchema.optional(),
-      avg_entry_price: numericLikeSchema.optional(),
-      current_price: numericLikeSchema.optional(),
       unrealized_pnl: numericLikeSchema.optional(),
+      cost_basis: z.number().optional(),
+      unrealized_pnl_rate: z.number().optional(),
     })
     .loose()
 );
@@ -391,7 +390,7 @@ export const briefingPredictionMarketSchema = validate<BriefingPredictionMarket>
     .object({
       object_id: z.string(),
       symbol: z.string(),
-      title: z.string(),
+      title: z.string().nullable(),
       price: numericLikeSchema,
       outcomes: z.array(briefingPredictionOutcomeSchema),
       active: z.boolean(),
@@ -613,6 +612,13 @@ export const detailTradableObjectSchema = validate<DetailTradableObject>(
       decision_allowed: z.boolean(),
       tradable: z.boolean(),
       allowed_actions: z.array(z.enum(["buy", "sell"])),
+      blocked_reason: z.string().nullable().optional(),
+      market_slug: z.string().optional(),
+      question: z.string().nullable().optional(),
+      condition_id: z.string().nullable().optional(),
+      quote: unknownRecordSchema.nullable().optional(),
+      book_debug: unknownRecordSchema.nullable().optional(),
+      last_price: numericLikeSchema.nullable().optional(),
     })
     .loose()
 );
@@ -642,6 +648,19 @@ export const detailResponseObjectSchema = validate<DetailResponseObject>(
       suggested_alternatives: z.array(z.string()).optional(),
       suggested_next_request: unknownRecordSchema.nullable().optional(),
       warnings: z.array(z.union([unknownRecordSchema, z.string()])).optional(),
+      requested_object_id: z.string().optional(),
+      canonical_object_id: z.string().optional(),
+      object_scope: z.string().optional(),
+      quote_source: z.string().optional(),
+      quote_error: z.string().nullable().optional(),
+      candles_interval: z.string().optional(),
+      candles_source: z.string().optional(),
+      candles_error: z.string().nullable().optional(),
+      data_quality: unknownRecordSchema.optional(),
+      unavailable_reason: z.string().nullable().optional(),
+      retry_recommended: z.boolean().optional(),
+      retry_after_seconds: z.number().nullable().optional(),
+      no_trade_this_window: z.boolean().optional(),
     })
     .loose()
 );
@@ -663,7 +682,7 @@ export const detailResponseSchema = validate<DetailResponse>(
           tradable_objects: z.number(),
           decision_allowed_objects: z.number(),
           recommended_action: z.string(),
-          common_blocked_reasons: z.array(z.string()).optional(),
+          common_blocked_reasons: z.array(z.string()),
         })
         .loose(),
       rate_limit: z
@@ -724,13 +743,26 @@ export const actionExecutionResultSchema = validate<ActionExecutionResult>(
       reason_tag: z.string(),
       reasoning_summary: z.string(),
       fill_price: numericLikeSchema.optional(),
-      filled_amount_usd: numericLikeSchema.optional(),
-      filled_units: numericLikeSchema.optional(),
-      requested_amount_usd: numericLikeSchema.optional(),
-      requested_units: numericLikeSchema.optional(),
-      notional_usd: numericLikeSchema.optional(),
+      filled_amount_usd: z.number().nullable().optional(),
+      filled_units: z.number().nullable().optional(),
+      requested_amount_usd: z.number().optional(),
+      requested_units: z.number().nullable().optional(),
+      notional_usd: z.number().optional(),
       quote_source: z.string().nullable().optional(),
       rejection_reason: z.string().nullable().optional(),
+      fee: z.number().nullable().optional(),
+      fee_bps: z.number().optional(),
+      fee_currency: z.string().optional(),
+      slippage: z.number().nullable().optional(),
+      slippage_bps: z.number().nullable().optional(),
+      unfilled_units: z.number().nullable().optional(),
+      unfilled_amount_usd: z.number().optional(),
+      unfilled_reason: z.string().nullable().optional(),
+      liquidity_model: z.string().optional(),
+      top_tier: z.enum(["top_3", "top_10", "normal"]).optional(),
+      fillable_notional_usd_at_submission: z.number().nullable().optional(),
+      quote_at_submission: unknownRecordSchema.nullable().optional(),
+      quote_debug: unknownRecordSchema.nullable().optional(),
     })
     .loose()
 );

@@ -147,10 +147,9 @@ export interface Position {
   avg_price?: NumericLike;
   market_price?: NumericLike;
   market_value?: NumericLike;
-  quantity?: NumericLike;
-  avg_entry_price?: NumericLike;
-  current_price?: NumericLike;
   unrealized_pnl?: NumericLike;
+  cost_basis?: number;
+  unrealized_pnl_rate?: number;
   [key: string]: unknown;
 }
 
@@ -254,7 +253,7 @@ export interface BriefingPredictionOutcome {
 export interface BriefingPredictionMarket {
   object_id: string;
   symbol: string;
-  title: string;
+  title: string | null;
   price: NumericLike;
   outcomes: BriefingPredictionOutcome[];
   active: boolean;
@@ -415,6 +414,13 @@ export interface DetailTradableObject {
   decision_allowed: boolean;
   tradable: boolean;
   allowed_actions: ("buy" | "sell")[];
+  blocked_reason?: string | null;
+  market_slug?: string;
+  question?: string | null;
+  condition_id?: string | null;
+  quote?: Record<string, unknown> | null;
+  book_debug?: Record<string, unknown> | null;
+  last_price?: NumericLike | null;
   [key: string]: unknown;
 }
 
@@ -441,6 +447,19 @@ export interface DetailResponseObject {
   suggested_alternatives?: string[];
   suggested_next_request?: Record<string, unknown> | null;
   warnings?: Array<Record<string, unknown> | string>;
+  requested_object_id?: string;
+  canonical_object_id?: string;
+  object_scope?: string;
+  quote_source?: string;
+  quote_error?: string | null;
+  candles_interval?: string;
+  candles_source?: string;
+  candles_error?: string | null;
+  data_quality?: Record<string, unknown>;
+  unavailable_reason?: string | null;
+  retry_recommended?: boolean;
+  retry_after_seconds?: number | null;
+  no_trade_this_window?: boolean;
   [key: string]: unknown;
 }
 
@@ -458,7 +477,7 @@ export interface DetailResponse {
     tradable_objects: number;
     decision_allowed_objects: number;
     recommended_action: string;
-    common_blocked_reasons?: string[];
+    common_blocked_reasons: string[];
     [key: string]: unknown;
   };
   rate_limit: {
@@ -506,13 +525,26 @@ export interface ActionExecutionResult {
   reason_tag: string;
   reasoning_summary: string;
   fill_price?: NumericLike;
-  filled_amount_usd?: NumericLike;
-  filled_units?: NumericLike;
-  requested_amount_usd?: NumericLike;
-  requested_units?: NumericLike;
-  notional_usd?: NumericLike;
+  filled_amount_usd?: number | null;
+  filled_units?: number | null;
+  requested_amount_usd?: number;
+  requested_units?: number | null;
+  notional_usd?: number;
   quote_source?: string | null;
   rejection_reason?: string | null;
+  fee?: number | null;
+  fee_bps?: number;
+  fee_currency?: string;
+  slippage?: number | null;
+  slippage_bps?: number | null;
+  unfilled_units?: number | null;
+  unfilled_amount_usd?: number;
+  unfilled_reason?: string | null;
+  liquidity_model?: string;
+  top_tier?: "top_3" | "top_10" | "normal";
+  fillable_notional_usd_at_submission?: number | null;
+  quote_at_submission?: Record<string, unknown> | null;
+  quote_debug?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 
