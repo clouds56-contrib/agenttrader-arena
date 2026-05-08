@@ -1,0 +1,751 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$ROOT_DIR"
+
+declare -A ENV_VALUES=()
+declare -a WEB_ENV_KEYS=()
+declare -a WORKER_ENV_KEYS=()
+declare -a VPS_ENV_KEYS=()
+declare -a VERCEL_ENV_KEYS=()
+declare -a RAILWAY_ENV_KEYS=()
+
+SECRETS_KEYS=(
+  ENV_CONTENT
+  VPS_HOST
+  VPS_USERNAME
+  VPS_SSH_KEY
+  GHCR_READ_TOKEN
+  UPSTASH_REDIS_REST_TOKEN
+  VERCEL_TOKEN
+  RAILWAY_TOKEN
+  AUTH_SECRET
+  CRON_SECRET
+  POSTGRES_PASSWORD
+  REDIS_PASSWORD
+  DATABASE_URL
+  REDIS_URL
+  MASSIVE_API_KEY
+  BINANCE_API_KEY
+  POLYMARKET_API_KEY
+  GOOGLE_CLIENT_ID
+  GOOGLE_CLIENT_SECRET
+  GITHUB_CLIENT_ID
+  GITHUB_CLIENT_SECRET
+)
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/envctl --input prod,vps --output TARGET [options]
+
+Targets:
+  web-new/.env
+  workers/.env
+  github:vps
+  github:vercel
+  github:railway
+
+Options:
+  --input LIST         Comma-separated source names or file paths.
+  --output TARGET      Output target file path or github target.
+  --show-keys          Print target keys and classification without reading inputs or writing anything.
+  --local              Preset: write web-new/.env and workers/.env.
+  --github             Preset: sync github:vps, github:vercel, and github:railway.
+  --repo OWNER/REPO    GitHub repository for github:* outputs.
+  --ci-ref REF         Git ref used when triggering CI after github:* sync.
+  --run-ci             Trigger CI after github:* sync.
+  --dry-run            Print what would be written or synced.
+  --help               Show this help.
+
+Examples:
+  scripts/envctl --input prod,vercel --output web-new/.env
+  scripts/envctl --input prod,railway --output workers/.env
+  scripts/envctl --input prod,vps --output github:vps
+  scripts/envctl --output github:vps --show-keys
+  scripts/envctl --local
+  scripts/envctl --github
+EOF
+}
+
+trim() {
+  local value="$1"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  printf '%s' "$value"
+}
+
+array_contains() {
+  local array_name="$1"
+  local needle="$2"
+  local item
+  local -n array_ref="$array_name"
+
+  for item in "${array_ref[@]}"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+
+  return 1
+}
+
+append_unique() {
+  local array_name="$1"
+  local value="$2"
+  local -n array_ref="$array_name"
+
+  array_contains "$array_name" "$value" || array_ref+=("$value")
+}
+
+is_secret_key() {
+  local key="$1"
+  local lowered
+
+  if array_contains SECRETS_KEYS "$key"; then
+    return 0
+  fi
+
+  lowered=$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')
+  [[ "$lowered" == *secret* || "$lowered" == *password* || "$lowered" == *key* || "$lowered" == *token* ]]
+}
+
+strip_quotes() {
+  local value="$1"
+  if [[ ${#value} -ge 2 ]]; then
+    if [[ ${value:0:1} == '"' && ${value: -1} == '"' ]]; then
+      value=${value:1:-1}
+    elif [[ ${value:0:1} == "'" && ${value: -1} == "'" ]]; then
+      value=${value:1:-1}
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+resolve_input_path() {
+  local source="$1"
+  case "$source" in
+    prod|vps|vercel|railway)
+      printf '%s/.env.%s' "$ROOT_DIR" "$source"
+      ;;
+    *)
+      if [[ "$source" = /* ]]; then
+        printf '%s' "$source"
+      else
+        printf '%s/%s' "$ROOT_DIR" "$source"
+      fi
+      ;;
+  esac
+}
+
+load_env_file() {
+  local file="$1"
+  local line key value
+
+  [[ -f "$file" ]] || {
+    printf 'Missing env source: %s\n' "$file" >&2
+    exit 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(trim "$line")
+    [[ -n "$line" ]] || continue
+    [[ ${line:0:1} == '#' ]] && continue
+
+    if [[ $line == export\ * ]]; then
+      line=${line#export }
+      line=$(trim "$line")
+    fi
+
+    [[ $line == *=* ]] || continue
+    key=$(trim "${line%%=*}")
+    value=$(trim "${line#*=}")
+    value=$(strip_quotes "$value")
+
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    ENV_VALUES["$key"]="$value"
+  done < "$file"
+}
+
+extract_env_keys_from_example() {
+  local file="$1"
+  local line normalized key
+
+  [[ -f "$file" ]] || {
+    printf 'Missing env example: %s\n' "$file" >&2
+    exit 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(trim "$line")
+    [[ -n "$line" ]] || continue
+
+    normalized="$line"
+    if [[ ${normalized:0:1} == '#' ]]; then
+      normalized=${normalized#\#}
+      normalized=$(trim "$normalized")
+    fi
+
+    [[ $normalized == *=* ]] || continue
+    [[ $normalized =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    key=$(trim "${normalized%%=*}")
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    printf '%s\n' "$key"
+  done < "$file"
+}
+
+load_keys_from_example() {
+  local file="$1"
+  local array_name="$2"
+  local key
+
+  while IFS= read -r key; do
+    append_unique "$array_name" "$key"
+  done < <(extract_env_keys_from_example "$file")
+}
+
+init_key_sets() {
+  WEB_ENV_KEYS=()
+  WORKER_ENV_KEYS=()
+  VPS_ENV_KEYS=()
+  VERCEL_ENV_KEYS=()
+  RAILWAY_ENV_KEYS=()
+
+  load_keys_from_example "$ROOT_DIR/web-new/.env.example" WEB_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/workers/.env.example" WORKER_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.vps.example" VPS_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.vercel.example" VERCEL_ENV_KEYS
+  load_keys_from_example "$ROOT_DIR/.env.railway.example" RAILWAY_ENV_KEYS
+}
+
+has_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_github_cli() {
+  has_command gh || {
+    printf 'Missing required tool: gh\n' >&2
+    exit 1
+  }
+
+  gh auth status >/dev/null 2>&1 || {
+    printf 'GitHub CLI is not authenticated. Run: gh auth login\n' >&2
+    exit 1
+  }
+}
+
+ensure_github_repo() {
+  if [[ "$DRY_RUN" == false ]]; then
+    require_github_cli
+    if [[ -z "$REPO" ]]; then
+      REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+      printf 'Using GitHub repository: %s\n' "$REPO"
+    fi
+  fi
+}
+
+github_environment_name() {
+  local target="$1"
+  case "$target" in
+    github:vps)
+      printf 'vps'
+      ;;
+    github:vercel)
+      printf 'vercel'
+      ;;
+    github:railway)
+      printf 'railway'
+      ;;
+    *)
+      printf 'Unknown GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+}
+
+build_github_target_keys() {
+  local target="$1"
+  local key
+  local -a target_keys=()
+
+  for key in $(build_github_control_keys "$target"); do
+    append_unique target_keys "$key"
+  done
+  append_unique target_keys ENV_CONTENT
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_runtime_target_keys() {
+  local target="$1"
+  local key
+  local -a target_keys=()
+
+  case "$target" in
+    github:vps)
+      for key in "${WEB_ENV_KEYS[@]}" "${WORKER_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    github:vercel)
+      for key in "${WEB_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    github:railway)
+      for key in "${WORKER_ENV_KEYS[@]}"; do
+        append_unique target_keys "$key"
+      done
+      ;;
+    *)
+      printf 'Unsupported GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_github_control_keys() {
+  local target="$1"
+  local key runtime_key base_array_name
+  local -a target_keys=()
+  local -a runtime_keys=()
+  local -n base_array_ref
+
+  case "$target" in
+    github:vps)
+      base_array_name=VPS_ENV_KEYS
+      ;;
+    github:vercel)
+      base_array_name=VERCEL_ENV_KEYS
+      ;;
+    github:railway)
+      base_array_name=RAILWAY_ENV_KEYS
+      ;;
+    *)
+      printf 'Unsupported GitHub target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+
+  mapfile -t runtime_keys < <(build_runtime_target_keys "$target")
+  base_array_ref="$base_array_name"
+
+  for key in "${base_array_ref[@]}"; do
+    local skip=false
+    for runtime_key in "${runtime_keys[@]}"; do
+      if [[ "$key" == "$runtime_key" ]]; then
+        skip=true
+        break
+      fi
+    done
+    if [[ "$skip" == false ]]; then
+      append_unique target_keys "$key"
+    fi
+  done
+
+  printf '%s\n' "${target_keys[@]}"
+}
+
+build_output_target_keys() {
+  local target="$1"
+
+  case "$target" in
+    github:*)
+      build_github_target_keys "$target"
+      ;;
+    web-new/.env|*/web-new/.env)
+      printf '%s\n' "${WEB_ENV_KEYS[@]}"
+      ;;
+    workers/.env|*/workers/.env)
+      printf '%s\n' "${WORKER_ENV_KEYS[@]}"
+      ;;
+    *)
+      printf 'Unsupported output target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+}
+
+show_target_keys() {
+  local target="$1"
+  local key kind
+
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    if is_secret_key "$key"; then
+      kind=secret
+    else
+      kind=variable
+    fi
+    printf '%s %s\n' "$kind" "$key"
+  done < <(build_output_target_keys "$target")
+}
+
+load_inputs() {
+  local input_spec="$1"
+  local source
+  local -a inputs=()
+
+  ENV_VALUES=()
+  IFS=',' read -r -a inputs <<< "$input_spec"
+
+  for source in "${inputs[@]}"; do
+    source=$(trim "$source")
+    [[ -n "$source" ]] || continue
+    load_env_file "$(resolve_input_path "$source")"
+  done
+}
+
+write_env_file() {
+  local output_path="$1"
+  shift
+  local keys=("$@")
+  local absolute_path="$output_path"
+  local key value count=0 missing_count=0
+
+  if [[ "$absolute_path" != /* ]]; then
+    absolute_path="$ROOT_DIR/$absolute_path"
+  fi
+
+  mkdir -p "$(dirname "$absolute_path")"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] would write %s\n' "$output_path"
+  else
+    : > "$absolute_path"
+  fi
+
+  for key in "${keys[@]}"; do
+    value=${ENV_VALUES[$key]:-}
+    if [[ "$DRY_RUN" == true ]]; then
+      if [[ -n "$value" ]]; then
+        printf '[dry-run] %s\n' "$key"
+      else
+        printf '[dry-run] # %s=\n' "$key"
+      fi
+    else
+      if [[ -n "$value" ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$absolute_path"
+      else
+        printf '# %s=\n' "$key" >> "$absolute_path"
+      fi
+    fi
+    if [[ -n "$value" ]]; then
+      ((count += 1))
+    else
+      ((missing_count += 1))
+    fi
+  done
+
+  if [[ "$DRY_RUN" == false ]]; then
+    printf 'Wrote %d values and %d placeholders to %s\n' "$count" "$missing_count" "$output_path"
+  fi
+}
+
+build_github_value_keys() {
+  local target="$1"
+  local key
+  local -a value_keys=()
+
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    [[ -n ${ENV_VALUES[$key]:-} ]] || continue
+    append_unique value_keys "$key"
+  done < <(build_github_control_keys "$target")
+
+  printf '%s\n' "${value_keys[@]}"
+}
+
+emit_github_env_payload() {
+  local kind="$1"
+  shift
+  local key value
+
+  for key in "$@"; do
+    value=${ENV_VALUES[$key]:-}
+    [[ -n "$value" ]] || continue
+    if [[ "$kind" == secret ]]; then
+      is_secret_key "$key" || continue
+    else
+      is_secret_key "$key" && continue
+    fi
+    printf '%s=%s\n' "$key" "$value"
+  done
+}
+
+build_env_content_payload() {
+  local target="$1"
+  local key value
+  local -a runtime_keys=()
+
+  mapfile -t runtime_keys < <(build_runtime_target_keys "$target")
+
+  for key in "${runtime_keys[@]}"; do
+    value=${ENV_VALUES[$key]:-}
+    [[ -n "$value" ]] || continue
+    printf '%s=%s\n' "$key" "$value"
+  done
+}
+
+sync_github_target() {
+  local target="$1"
+  local repo="$2"
+  local ci_ref="$3"
+  local run_ci="$4"
+  local github_env key kind secret_count=0 variable_count=0 prepared_count env_content
+  local -a value_keys=()
+
+  github_env=$(github_environment_name "$target")
+
+  mapfile -t value_keys < <(build_github_value_keys "$target")
+  env_content=$(build_env_content_payload "$target")
+
+  if [[ ${#value_keys[@]} -eq 0 && -z "$env_content" ]]; then
+    printf 'No GitHub values available for %s\n' "$target" >&2
+    exit 1
+  fi
+
+  if [[ "$DRY_RUN" == false && -z "$repo" ]]; then
+    printf 'Missing GitHub repo for %s\n' "$target" >&2
+    exit 1
+  fi
+
+  prepared_count=${#value_keys[@]}
+  if [[ -n "$env_content" ]]; then
+    ((prepared_count += 1))
+  fi
+
+  printf 'Prepared %d GitHub settings for %s (%s environment)\n' "$prepared_count" "$target" "$github_env"
+
+  for key in "${value_keys[@]}"; do
+    if is_secret_key "$key"; then
+      kind=secret
+      ((secret_count += 1))
+    else
+      kind=variable
+      ((variable_count += 1))
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] %s %s --env %s\n' "$kind" "$key" "$github_env"
+    fi
+  done
+
+  if [[ -n "$env_content" ]]; then
+    ((secret_count += 1))
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] secret ENV_CONTENT --env %s\n' "$github_env"
+    fi
+  fi
+
+  if [[ "$DRY_RUN" == false ]]; then
+    if [[ "$secret_count" -gt 0 ]]; then
+      printf 'Updating %d secrets in %s\n' "$secret_count" "$github_env"
+      if [[ ${#value_keys[@]} -gt 0 ]]; then
+        emit_github_env_payload secret "${value_keys[@]}" | gh secret set -f - --repo "$repo" --env "$github_env"
+      fi
+      if [[ -n "$env_content" ]]; then
+        printf '%s' "$env_content" | gh secret set ENV_CONTENT --repo "$repo" --env "$github_env"
+      fi
+    fi
+
+    if [[ "$variable_count" -gt 0 ]]; then
+      printf 'Updating %d variables in %s\n' "$variable_count" "$github_env"
+      emit_github_env_payload variable "${value_keys[@]}" | gh variable set -f - --repo "$repo" --env "$github_env"
+    fi
+  fi
+
+  printf 'Synced %d secrets and %d variables\n' "$secret_count" "$variable_count"
+
+  if [[ "$run_ci" == false ]]; then
+    return 0
+  fi
+
+  trigger_ci "$repo" "$ci_ref"
+}
+
+trigger_ci() {
+  local repo="$1"
+  local ci_ref="$2"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] would trigger workflow ci.yml on ref %s\n' "$ci_ref"
+    return 0
+  fi
+
+  printf 'Triggering CI workflow on ref %s\n' "$ci_ref"
+  gh workflow run ci.yml --repo "$repo" --ref "$ci_ref"
+}
+
+INPUT_SPEC=""
+OUTPUT_TARGET=""
+REPO=""
+CI_REF=""
+RUN_CI=false
+DRY_RUN=false
+SHOW_KEYS=false
+LOCAL_PRESET=false
+GITHUB_PRESET=false
+
+init_key_sets
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --input)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --input\n' >&2
+        exit 1
+      }
+      INPUT_SPEC="$2"
+      shift 2
+      ;;
+    --output)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --output\n' >&2
+        exit 1
+      }
+      OUTPUT_TARGET="$2"
+      shift 2
+      ;;
+    --show-keys)
+      SHOW_KEYS=true
+      shift
+      ;;
+    --local)
+      LOCAL_PRESET=true
+      shift
+      ;;
+    --github)
+      GITHUB_PRESET=true
+      shift
+      ;;
+    --repo)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --repo\n' >&2
+        exit 1
+      }
+      REPO="$2"
+      shift 2
+      ;;
+    --ci-ref)
+      [[ $# -ge 2 ]] || {
+        printf 'Missing value for --ci-ref\n' >&2
+        exit 1
+      }
+      CI_REF="$2"
+      shift 2
+      ;;
+    --run-ci)
+      RUN_CI=true
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$LOCAL_PRESET" == true && "$GITHUB_PRESET" == true ]]; then
+  printf '%s\n' '--local and --github cannot be used together' >&2
+  exit 1
+fi
+
+if [[ "$LOCAL_PRESET" == true || "$GITHUB_PRESET" == true ]]; then
+  if [[ -n "$INPUT_SPEC" || -n "$OUTPUT_TARGET" || "$SHOW_KEYS" == true ]]; then
+    printf '%s\n' 'preset flags cannot be combined with --input or --output' >&2
+    exit 1
+  fi
+fi
+
+if [[ "$SHOW_KEYS" == true ]]; then
+  [[ -n "$OUTPUT_TARGET" ]] || {
+    printf '%s: %s\n' "$0" '--output is required with --show-keys' >&2
+    exit 1
+  }
+
+  show_target_keys "$OUTPUT_TARGET"
+  exit 0
+fi
+
+if [[ "$LOCAL_PRESET" == false && "$GITHUB_PRESET" == false ]]; then
+  [[ -n "$INPUT_SPEC" ]] || {
+    printf '%s: %s\n' "$0" '--input is required' >&2
+    exit 1
+  }
+
+  [[ -n "$OUTPUT_TARGET" ]] || {
+    printf '%s: %s\n' "$0" '--output is required' >&2
+    exit 1
+  }
+fi
+
+if [[ -z "$CI_REF" ]]; then
+  CI_REF=$(git branch --show-current 2>/dev/null || true)
+  CI_REF=${CI_REF:-main}
+fi
+
+if [[ "$LOCAL_PRESET" == true ]]; then
+  load_inputs 'prod,vercel'
+  write_env_file 'web-new/.env' "${WEB_ENV_KEYS[@]}"
+
+  load_inputs 'prod,railway'
+  write_env_file 'workers/.env' "${WORKER_ENV_KEYS[@]}"
+  exit 0
+fi
+
+if [[ "$GITHUB_PRESET" == true ]]; then
+  ensure_github_repo
+
+  load_inputs 'prod,vps'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:vps' "$REPO" "$CI_REF" false
+
+  load_inputs 'prod,vercel'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:vercel' "$REPO" "$CI_REF" false
+
+  load_inputs 'prod,railway'
+  TARGET_VALUES=()
+  TARGET_KINDS=()
+  sync_github_target 'github:railway' "$REPO" "$CI_REF" false
+
+  if [[ "$RUN_CI" == true ]]; then
+    trigger_ci "$REPO" "$CI_REF"
+  fi
+  exit 0
+fi
+
+load_inputs "$INPUT_SPEC"
+
+if [[ "$OUTPUT_TARGET" == github:* ]]; then
+  ensure_github_repo
+fi
+
+case "$OUTPUT_TARGET" in
+  github:*)
+    sync_github_target "$OUTPUT_TARGET" "$REPO" "$CI_REF" "$RUN_CI"
+    ;;
+  web-new/.env|*/web-new/.env)
+    write_env_file "$OUTPUT_TARGET" "${WEB_ENV_KEYS[@]}"
+    ;;
+  workers/.env|*/workers/.env)
+    write_env_file "$OUTPUT_TARGET" "${WORKER_ENV_KEYS[@]}"
+    ;;
+  *)
+    printf 'Unsupported output target: %s\n' "$OUTPUT_TARGET" >&2
+    exit 1
+    ;;
+esac

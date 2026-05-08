@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agentrader}
+      POSTGRES_USER: ${POSTGRES_USER:-agentrader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$${REDIS_PASSWORD}" ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: ${WEB_DEPLOY_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      AUTH_URL: ${AUTH_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      REDIS_URL: ${REDIS_URL}
+      AGENTTRADER_MARKET_DATA_MODE: ${AGENTTRADER_MARKET_DATA_MODE:-auto}
+      AGENTTRADER_COMPETITION_PHASE: ${AGENTTRADER_COMPETITION_PHASE:-official}
+      AGENTTRADER_BRIEFING_WINDOW_MINUTES: ${AGENTTRADER_BRIEFING_WINDOW_MINUTES:-15}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      MASSIVE_BASE_URL: ${MASSIVE_BASE_URL:-https://api.massive.com}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.us}
+      POLYMARKET_API_KEY: ${POLYMARKET_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  workers:
+    image: ${WORKERS_DEPLOY_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '8081:8080'
+    environment:
+      PORT: 8080
+      REDIS_URL: ${REDIS_URL}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      BINANCE_ENABLED: ${BINANCE_ENABLED:-true}
+      BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.us:9443}
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.us}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      MASSIVE_ENABLED: ${MASSIVE_ENABLED:-true}
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      MASSIVE_WS_URL: ${MASSIVE_WS_URL:-wss://delayed.massive.com/stocks}
+      MASSIVE_BASE_URL: ${MASSIVE_BASE_URL:-https://api.massive.com}
+      MASSIVE_SYMBOLS: ${MASSIVE_SYMBOLS:-AAPL,MSFT,NVDA,TSLA,AMZN}
+      MASSIVE_RECENT_SYMBOL_LIMIT: ${MASSIVE_RECENT_SYMBOL_LIMIT:-8}
+      WORKER_ENABLE_SCHEDULER: ${WORKER_ENABLE_SCHEDULER:-true}
+      WORKER_APP_URL: ${WORKER_APP_URL:-http://web:8080}
+      CRON_SECRET: ${CRON_SECRET}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
