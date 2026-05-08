@@ -27,10 +27,13 @@ export type {
   ErrorReportRequest,
   ErrorReportResult,
   DailySummaryUpdate,
+  DailySummaryUpdateResult,
   ApiErrorResponse,
   SuccessEnvelope,
   ErrorEnvelope,
   ApiResponse,
+  MarketType,
+  NumericLike,
 } from "./types";
 
 export { DEFAULT_BASE_URL, ENDPOINTS } from "./constants";

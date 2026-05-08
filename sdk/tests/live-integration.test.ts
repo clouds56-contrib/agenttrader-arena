@@ -2,12 +2,29 @@ import { createRequire } from 'node:module';
 
 import postgres, { type Sql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import type {
+  AgentTraderClient as AgentTraderClientType,
+  DailySummaryUpdate,
+  DecisionExecutionResult,
+  DecisionRequest,
+  DetailRequest,
+  DetailResponse,
+  ErrorReportRequest,
+  ErrorReportResult,
+  HeartbeatPingResponse,
+  RegistrationRequest,
+  RegistrationResponse,
+} from '../src';
 
 const require = createRequire(import.meta.url);
 const {
   AgentTraderApiError,
   AgentTraderAuthError,
   AgentTraderClient,
+}: {
+  AgentTraderApiError: typeof import('../src').AgentTraderApiError;
+  AgentTraderAuthError: typeof import('../src').AgentTraderAuthError;
+  AgentTraderClient: typeof AgentTraderClientType;
 } = require('../dist');
 
 const baseUrl = (process.env.AGENTTRADER_SDK_BASE_URL || 'http://127.0.0.1:3100').replace(
@@ -419,7 +436,7 @@ describe.sequential('live sdk integration', () => {
         await expect(unauthenticatedClient.me()).rejects.toBeInstanceOf(AgentTraderAuthError);
 
         const client = new AgentTraderClient({ baseUrl });
-        const registration = await client.register({
+        const registrationInput: RegistrationRequest = {
           name: `SDK ${token}`,
           description: 'Live SDK integration test agent',
           registration_source: 'sdk-integration-test',
@@ -433,7 +450,8 @@ describe.sequential('live sdk integration', () => {
             risk_preference: 'balanced',
             market_preferences: ['prediction'],
           },
-        });
+        };
+        const registration: RegistrationResponse = await client.register(registrationInput);
 
         agentId = registration.agent_id;
         expect(registration.api_key).toMatch(/^at_/);
@@ -464,7 +482,7 @@ describe.sequential('live sdk integration', () => {
         expect(meAfterClaim.agent_id).toBe(agentId);
         expect(meAfterClaim.status).toBe('active');
 
-        const pong = await client.heartbeatPing();
+        const pong: HeartbeatPingResponse = await client.heartbeatPing();
         expect(pong.agent_id).toBe(agentId);
         expect(pong.pong).toBe(true);
         expect(pong.runner_status).toBe('ready');
@@ -474,7 +492,7 @@ describe.sequential('live sdk integration', () => {
         expect(typeof windowId).toBe('string');
         expect(Array.isArray(briefing.market_signal_summary?.prediction?.top_markets)).toBe(true);
 
-        const detail = await client.requestDetail({
+        const detailInput: DetailRequest = {
           type: 'detail_request',
           request_id: requestId,
           window_id: windowId,
@@ -483,7 +501,8 @@ describe.sequential('live sdk integration', () => {
           reason:
             'Need the current outcome-level quote quality and execution whitelist before placing a prediction trade in this window.',
           objects: [`pm:${symbol}`],
-        });
+        };
+        const detail: DetailResponse = await client.requestDetail(detailInput);
 
         expect(detail.type).toBe('detail_response');
         expect(detail.request_id).toBe(requestId);
@@ -498,7 +517,7 @@ describe.sequential('live sdk integration', () => {
           )
         ).toBe(true);
 
-        const decision = await client.submitDecision({
+        const decisionInput: DecisionRequest = {
           type: 'decision',
           decision_id: decisionId,
           window_id: windowId,
@@ -516,7 +535,8 @@ describe.sequential('live sdk integration', () => {
                 'The current detail payload whitelists the YES outcome, top-of-book is internally consistent, and the position size remains small versus available cash and concentration limits.',
             },
           ],
-        });
+        };
+        const decision: DecisionExecutionResult = await client.submitDecision(decisionInput);
 
         expect(decision.type).toBe('decision_execution_result');
         expect(decision.decision_id).toBe(decisionId);
@@ -554,7 +574,7 @@ describe.sequential('live sdk integration', () => {
           details: { window_id: windowId },
         } satisfies Partial<InstanceType<typeof AgentTraderApiError>>);
 
-        const errorReport = await client.reportError({
+        const errorReportInput: ErrorReportRequest = {
           type: 'error_report',
           report_type: 'runtime_exception',
           source_endpoint: '/sdk/live-integration',
@@ -570,18 +590,20 @@ describe.sequential('live sdk integration', () => {
             symbol,
             outcome: 'YES',
           },
-        });
+        };
+        const errorReport: ErrorReportResult = await client.reportError(errorReportInput);
 
         expect(errorReport.type).toBe('error_report_result');
         expect(errorReport.report_type).toBe('runtime_exception');
         expect(errorReport.summary.includes('synthetic runtime note')).toBe(true);
 
-        const dailySummary = await client.updateDailySummary({
+        const dailySummaryInput: DailySummaryUpdate = {
           type: 'daily_summary_update',
           summary_date: summaryDate,
           summary:
             'Captured one successful prediction trade during the SDK integration workflow and verified the reporting routes after execution.',
-        });
+        };
+        const dailySummary = await client.updateDailySummary(dailySummaryInput);
 
         expect(dailySummary.type).toBe('daily_summary_update_result');
         expect(dailySummary.agent_id).toBe(agentId);

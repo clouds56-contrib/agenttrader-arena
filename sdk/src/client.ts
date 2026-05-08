@@ -13,6 +13,7 @@ import type {
   ErrorReportRequest,
   ErrorReportResult,
   DailySummaryUpdate,
+  DailySummaryUpdateResult,
   SuccessEnvelope,
   ErrorEnvelope,
 } from "./types";
@@ -99,8 +100,8 @@ export class AgentTraderClient {
 
   async updateDailySummary(
     input: DailySummaryUpdate
-  ): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>(
+  ): Promise<DailySummaryUpdateResult> {
+    return this.request<DailySummaryUpdateResult>(
       "POST",
       ENDPOINTS.dailySummary,
       input
