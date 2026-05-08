@@ -2,9 +2,13 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - main
+      - dev
   push:
     branches:
       - main
+      - dev
   release:
     types:
       - published
@@ -122,7 +126,9 @@ jobs:
         id: git_sha
         run: |
           SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BRANCH="${{ github.event.release.target_commitish || github.head_ref || github.ref_name }}"
           printf 'short=%s\n' "${SHA::7}" >> "$GITHUB_OUTPUT"
+          printf 'branch=%s\n' "$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Extract image metadata
         id: meta
@@ -131,7 +137,7 @@ jobs:
           images: ${{ matrix.image }}
           tags: |
             type=raw,value=git-${{ steps.git_sha.outputs.short }}
-            type=raw,value=main,enable=${{ github.event_name == 'release' }}
+            type=raw,value=${{ steps.git_sha.outputs.branch }},enable=${{ github.event_name == 'release' }}
             type=raw,value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
 
       - name: Build Docker image
