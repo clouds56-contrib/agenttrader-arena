@@ -59,6 +59,79 @@ jobs:
       - name: Build app
         run: pnpm build
 
+  test-sdk:
+    name: Test sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agenttrader_sdk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agenttrader_sdk_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/agentrader_sdk_test
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
+      AUTH_URL: http://127.0.0.1:3100
+      AUTH_SECRET: ci-auth-secret
+      CRON_SECRET: ci-cron-secret
+      AGENTTRADER_MARKET_DATA_MODE: sim
+      AGENTTRADER_SDK_BASE_URL: http://127.0.0.1:3100
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web-new/pnpm-lock.yaml
+            sdk/pnpm-lock.yaml
+
+      - name: Install web-new dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: web-new
+
+      - name: Install sdk dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: sdk
+
+      - name: Start web-new server
+        run: nohup pnpm exec next dev --hostname 127.0.0.1 --port 3100 > /tmp/web-new-sdk-ci.log 2>&1 &
+        working-directory: web-new
+
+      - name: Wait for web-new server
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3100/api/public/stats > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "web-new did not become ready in time" >&2
+          exit 1
+
+      - name: Run sdk integration tests
+        run: pnpm test:integration
+        working-directory: sdk
+
+      - name: Print web-new log on failure
+        if: failure()
+        run: cat /tmp/web-new-sdk-ci.log
+
   test-workers:
     name: Test workers
     runs-on: ubuntu-latest
@@ -92,6 +165,7 @@ jobs:
     timeout-minutes: 30
     needs:
       - test-web
+      - test-sdk
       - test-workers
     strategy:
       fail-fast: false
