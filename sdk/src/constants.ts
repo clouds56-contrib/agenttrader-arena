@@ -1,4 +1,4 @@
-export const DEFAULT_BASE_URL = "https://agenttrader.com";
+export const DEFAULT_BASE_URL = "https://agenttrader.io";
 
 export const ENDPOINTS = {
   register: "/api/openclaw/agents/register",
