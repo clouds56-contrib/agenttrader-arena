@@ -512,7 +512,7 @@ describe.sequential('live sdk integration', () => {
         expect(detail.objects[0].blocked_reason).toBe('SELECT_TRADABLE_OUTCOME_REQUIRED');
         expect(
           detail.objects[0].decision_allowed_objects.some(
-            (candidate: { object_id: string; outcome_id: string | null }) =>
+            (candidate) =>
               candidate.object_id === `pm:${symbol}:YES` && candidate.outcome_id === yesOutcomeId
           )
         ).toBe(true);

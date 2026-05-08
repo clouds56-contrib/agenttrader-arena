@@ -19,6 +19,7 @@ export type {
   DetailRequest,
   DetailRequestObject,
   DetailResponse,
+  DetailResponseObject,
   DetailTradableObject,
   DecisionAction,
   DecisionRequest,

@@ -136,14 +136,17 @@ export interface HeartbeatPingResponse {
 
 export interface Position {
   symbol?: string;
-  market: string;
+  market?: string;
+  market_type?: string;
   object_id?: string;
+  external_token_id?: string | null;
   event_id?: string | null;
   outcome_id?: string | null;
   outcome_name?: string | null;
   qty?: NumericLike;
   avg_price?: NumericLike;
   market_price?: NumericLike;
+  market_value?: NumericLike;
   quantity?: NumericLike;
   avg_entry_price?: NumericLike;
   current_price?: NumericLike;
@@ -167,8 +170,191 @@ export interface TradableObject {
   [key: string]: unknown;
 }
 
+export interface BriefingAgentProfile {
+  agent_id: string;
+  name: string;
+  public_profile_summary: string | null;
+  primary_market: MarketType | null;
+  familiar_symbols_or_event_types: string[];
+  strategy_style: string | null;
+  risk_preference: string | null;
+  market_preferences: string[];
+}
+
+export interface BriefingAccountView {
+  initial_cash: NumericLike;
+  cash: NumericLike;
+  equity: NumericLike;
+  display_equity: NumericLike;
+  return_decimal: number;
+  return_display: string;
+  drawdown_decimal: number;
+  drawdown_display: string;
+  drawdown_basis: string;
+  risk_tag: string | null;
+  accounting_equity?: NumericLike;
+  positions?: Position[];
+  [key: string]: unknown;
+}
+
+export interface BriefingByMarketSummary {
+  positions: number;
+  market_value: number;
+  unrealized_pnl: number;
+}
+
+export interface BriefingPositionsSummary {
+  total_positions: number;
+  gross_market_value: number;
+  unrealized_pnl: number;
+  largest_position: Position | null;
+  by_market: Partial<Record<MarketType, BriefingByMarketSummary>>;
+}
+
+export interface BriefingDecisionWindow {
+  id: string;
+  used: number;
+  limit: number;
+  reached: boolean;
+  last_decision_at: string | null;
+}
+
+export interface BriefingRiskStatus {
+  current_mode: string;
+  risk_tag: string | null;
+  paused_by_operator: boolean;
+  awaiting_operator_resolution: boolean;
+  can_trade: boolean;
+  decision_allowed: boolean;
+  can_open_new_positions: boolean;
+  max_single_buy_notional: number;
+  sizing_equity: number;
+  decision_window: BriefingDecisionWindow;
+  constraints: string[];
+  summary: string;
+}
+
+export interface BriefingPredictionOutcome {
+  object_id: string;
+  event_id: string;
+  outcome_id: string | null;
+  external_token_id: string | null;
+  outcome_name: string;
+  price: NumericLike;
+  execution_allowed: boolean;
+  decision_allowed: boolean;
+  decision_allowed_scope: string;
+  detail_required_before_decision: boolean;
+  requires_detail_for_execution_quality: boolean;
+  blocked_reason: string | null;
+  quote_health: string;
+  rule_allowed: boolean;
+}
+
+export interface BriefingPredictionMarket {
+  object_id: string;
+  symbol: string;
+  title: string;
+  price: NumericLike;
+  outcomes: BriefingPredictionOutcome[];
+  active: boolean;
+  closed: boolean;
+  end_date: string | null;
+  volume_24h: NumericLike | null;
+  tradable_now: boolean;
+  recommended_action: string | null;
+  reason: string | null;
+}
+
+export interface BriefingMarketSummaryBase {
+  market_type?: MarketType;
+  status: string;
+  summary: string;
+  source?: string;
+  data_quality?: {
+    notes: string[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface BriefingSpotMarketSummary extends BriefingMarketSummaryBase {
+  top_movers?: Array<Record<string, unknown>>;
+}
+
+export interface BriefingPredictionMarketSummary extends BriefingMarketSummaryBase {
+  active_markets: number;
+  tradable_now: boolean;
+  recommended_action: string | null;
+  reason: string | null;
+  featured_market: BriefingPredictionMarket | null;
+  top_markets: BriefingPredictionMarket[];
+}
+
+export interface BriefingMarketSignalSummary {
+  highlights: string[];
+  actionable_markets: MarketType[];
+  stock: Pick<BriefingSpotMarketSummary, "status" | "summary">;
+  crypto: Pick<BriefingSpotMarketSummary, "status" | "summary">;
+  prediction: Pick<
+    BriefingPredictionMarketSummary,
+    | "status"
+    | "summary"
+    | "active_markets"
+    | "tradable_now"
+    | "recommended_action"
+    | "reason"
+    | "featured_market"
+    | "top_markets"
+  >;
+}
+
+export interface BriefingCompetition {
+  id: string;
+  name: string;
+  status: string;
+  description: string | null;
+  rule_version: string;
+  market_types: unknown[];
+  start_at: string | null;
+  end_at: string | null;
+  created_at: string | null;
+  competition_phase: string;
+  executed_action_count: number;
+  leaderboard_visibility_status: string;
+  required_executed_actions_for_visibility: number;
+  leaderboard_visibility?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface BriefingLeaderboard {
+  rank: number;
+  total_agents: number;
+  return_rate: NumericLike;
+  drawdown: NumericLike;
+  top_tier: string;
+}
+
+export interface BriefingMarketOverview {
+  watchlist: Array<{
+    symbol: string;
+    market: string;
+    last_price: NumericLike | null;
+    change_24h: NumericLike | null;
+  }>;
+  headline: string;
+  recent_public_trades: Array<Record<string, unknown>>;
+}
+
+export interface BriefingEndpoints {
+  skill_url: string;
+  briefing_url: string;
+  detail_request_url: string;
+  decisions_url: string;
+}
+
 export interface BriefingResponse {
-  type: string;
+  type: "agent_briefing";
   schema_version: string;
   protocol_version: string;
   generated_at: string;
@@ -179,49 +365,32 @@ export interface BriefingResponse {
   leaderboard_visibility_status: string;
   required_executed_actions_for_visibility: number;
   executed_action_count: number;
-  account: {
-    cash: NumericLike;
-    equity: NumericLike;
-    positions: Position[];
-    [key: string]: unknown;
+  public_profile_summary: string | null;
+  agent_profile: BriefingAgentProfile;
+  account_summary: BriefingAccountView;
+  positions_summary: BriefingPositionsSummary;
+  risk_status: BriefingRiskStatus;
+  market_signal_summary: BriefingMarketSignalSummary;
+  account: BriefingAccountView & { positions: Position[] };
+  markets: {
+    stock: BriefingSpotMarketSummary;
+    crypto: BriefingSpotMarketSummary;
+    prediction: BriefingPredictionMarketSummary;
   };
-  agent?: {
+  competition: BriefingCompetition;
+  agent: {
     id: string;
     name: string;
-    primary_market: MarketType;
-    risk_preference: string;
-    runner_status: string;
     status: string;
-    strategy_style: string;
-    [key: string]: unknown;
+    runner_status: string;
+    primary_market: MarketType | null;
+    strategy_style: string | null;
+    risk_preference: string | null;
   };
-  account_summary?: Record<string, unknown>;
-  agent_profile?: Record<string, unknown>;
-  competition?: Record<string, unknown>;
-  endpoints?: Record<string, string>;
-  market_overview?: Record<string, unknown>;
-  market_signal_summary?: Record<string, unknown>;
-  markets?: Record<string, unknown>;
-  open_positions?: Position[];
-  positions_summary?: Record<string, unknown>;
-  risk_status?: {
-    can_open_new_positions: boolean;
-    can_trade: boolean;
-    current_mode: string;
-    risk_tag: string | null;
-    decision_allowed: boolean;
-    decision_window: {
-      id: string;
-      used: number;
-      limit: number;
-      reached: boolean;
-      last_decision_at: string | null;
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  };
-  tradable_objects?: TradableObject[];
-  decision_allowed_objects?: string[];
+  open_positions: Position[];
+  market_overview: BriefingMarketOverview;
+  leaderboard: BriefingLeaderboard | null;
+  endpoints: BriefingEndpoints;
   [key: string]: unknown;
 }
 
@@ -239,6 +408,18 @@ export interface DetailRequest {
 
 export interface DetailTradableObject {
   object_id: string;
+  outcome_id: string | null;
+  outcome_name: string;
+  event_id: string | null;
+  external_token_id: string | null;
+  decision_allowed: boolean;
+  tradable: boolean;
+  allowed_actions: ("buy" | "sell")[];
+  [key: string]: unknown;
+}
+
+export interface DetailResponseObject {
+  object_id: string;
   market: string;
   symbol?: string;
   event_id?: string | null;
@@ -249,8 +430,8 @@ export interface DetailTradableObject {
   decision_allowed?: boolean;
   blocked_reason?: string | null;
   allowed_actions?: ("buy" | "sell")[];
-  decision_allowed_objects?: Array<Record<string, unknown>>;
-  tradable_objects?: Array<Record<string, unknown>>;
+  decision_allowed_objects: DetailTradableObject[];
+  tradable_objects: DetailTradableObject[];
   object_risk?: Record<string, unknown>;
   quote?: Record<string, unknown> | null;
   depth?: Record<string, unknown> | null;
@@ -270,7 +451,7 @@ export interface DetailResponse {
   generated_at: string;
   request_id: string;
   window_id: string;
-  objects: DetailTradableObject[];
+  objects: DetailResponseObject[];
   warnings: Array<Record<string, unknown> | string>;
   detail_summary: {
     requested_objects: number;
