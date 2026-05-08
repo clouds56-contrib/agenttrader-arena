@@ -382,6 +382,16 @@ function sanitizeForSnapshot(
       return Object.fromEntries(
         Object.entries(current as Record<string, unknown>).map(([key, entry]) => {
           if (
+            key === 'redis' &&
+            entry &&
+            typeof entry === 'object' &&
+            (entry as Record<string, unknown>).status === 'skipped' &&
+            (entry as Record<string, unknown>).message === 'redis_not_configured'
+          ) {
+            return [key, { status: 'miss' }];
+          }
+
+          if (
             [
               'agent_id',
               'api_key',
@@ -531,10 +541,85 @@ describe.sequential('live sdk integration', () => {
         expect(detail.request_id).toBe(requestId);
         expect(detail.window_id).toBe(windowId);
         expect(detail.objects).toHaveLength(1);
-        expect(detail.objects[0].market).toBe('prediction');
-        expect(detail.objects[0].blocked_reason).toBe('SELECT_TRADABLE_OUTCOME_REQUIRED');
+        expect(detail.detail_summary.common_blocked_reasons).toEqual([
+          'SELECT_TRADABLE_OUTCOME_REQUIRED',
+        ]);
+        const detailObject = detail.objects[0];
+        expect(detailObject.market).toBe('prediction');
+        expect(detailObject.blocked_reason).toBe('SELECT_TRADABLE_OUTCOME_REQUIRED');
+        expect(detailObject.requested_object_id).toBe(`pm:${symbol}`);
+        expect(detailObject.canonical_object_id).toBe(`pm:${symbol}:YES`);
+        expect(detailObject.object_scope).toBe('market');
+        expect(detailObject.quote_source).toBe('db');
+        expect(detailObject.quote_error).toBeNull();
+        expect(detailObject.candles_interval).toBe('1h');
+        expect(detailObject.candles_source).toBe('db');
+        expect(detailObject.candles_error).toBeNull();
+        expect(detailObject.unavailable_reason).toBeNull();
+        expect(detailObject.retry_recommended).toBe(false);
+        expect(detailObject.retry_after_seconds).toBeNull();
+        expect(detailObject.no_trade_this_window).toBe(false);
+        expect(detailObject.data_quality).toMatchObject({
+          candles_have_volume: true,
+          quote_bound_to_outcome: true,
+          quote_change_24h_complete: false,
+          quote_volume_24h_complete: true,
+          warnings_present: false,
+        });
+        expect(detailObject.quote).toMatchObject({
+          object_id: `pm:${symbol}:YES`,
+          canonical_object_id: `pm:${symbol}:YES`,
+          external_token_id: yesOutcomeId,
+          outcome_id: yesOutcomeId,
+          outcome_name: 'Yes',
+          source: 'db',
+          scope: 'outcome',
+          stale: false,
+          volume_24h: 125000,
+        });
+        expect(detailObject.depth).toMatchObject({
+          best_bid: '0.42',
+          best_ask: '0.43',
+          bid_size: '10000',
+          ask_size: '10000',
+          spread: '0.01',
+        });
+        expect(detailObject.object_risk).toMatchObject({
+          can_add_exposure: true,
+          current_exposure_usd: 0,
+          current_exposure_pct: 0,
+          max_exposure_pct: 60,
+          max_exposure_usd: 600000,
+          remaining_buy_notional_usd: 600000,
+        });
+        expect(detailObject.suggested_next_request).toMatchObject({
+          objects: [`pm:${symbol}:YES`, `pm:${symbol}:NO`],
+          scope: 'outcome',
+        });
+        const yesCandidate = detailObject.decision_allowed_objects.find(
+          (candidate) => candidate.object_id === `pm:${symbol}:YES`
+        );
+        expect(yesCandidate).toBeDefined();
+        expect(yesCandidate).toMatchObject({
+          outcome_id: yesOutcomeId,
+          outcome_name: 'Yes',
+          decision_allowed: true,
+          tradable: true,
+          blocked_reason: null,
+          market_slug: symbol,
+          question: 'Will the SDK integration trade execute?',
+          condition_id: `${symbol}_condition`,
+          last_price: '0.43',
+          allowed_actions: ['buy'],
+          book_debug: null,
+        });
+        expect(yesCandidate?.quote).toMatchObject({
+          source: 'db',
+          stale: false,
+          last_price: '0.43',
+        });
         expect(
-          detail.objects[0].decision_allowed_objects.some(
+          detailObject.decision_allowed_objects.some(
             (candidate) =>
               candidate.object_id === `pm:${symbol}:YES` && candidate.outcome_id === yesOutcomeId
           )
@@ -568,10 +653,68 @@ describe.sequential('live sdk integration', () => {
         expect(decision.window_id).toBe(windowId);
         expect(decision.execution_status).toBe('executed');
         expect(decision.actions).toHaveLength(1);
-        expect(decision.actions[0].status).toBe('filled');
-        expect(decision.actions[0].object_id).toBe(`pm:${symbol}:YES`);
-        expect(decision.actions[0].external_token_id).toBe(yesOutcomeId);
-        expect(decision.actions[0].fill_price).toBe(0.43);
+        const filledAction = decision.actions[0];
+        expect(filledAction.status).toBe('filled');
+        expect(filledAction.object_id).toBe(`pm:${symbol}:YES`);
+        expect(filledAction.external_token_id).toBe(yesOutcomeId);
+        expect(filledAction.fill_price).toBe(0.43);
+        expect(filledAction.requested_amount_usd).toBe(1000);
+        expect(filledAction.notional_usd).toBe(1000);
+        expect(filledAction.filled_amount_usd).toBe(1000);
+        expect(filledAction.filled_units).toBe(2325.581395);
+        expect(filledAction.requested_units).toBe(2325.581395);
+        expect(filledAction.unfilled_units).toBe(0);
+        expect(filledAction.unfilled_amount_usd).toBe(0);
+        expect(filledAction.unfilled_reason).toBeNull();
+        expect(filledAction.quote_source).toBe('db:sdk-integration-feed');
+        expect(filledAction.liquidity_model).toBe('top_of_book_ioc');
+        expect(filledAction.fillable_notional_usd_at_submission).toBe(1000);
+        expect(filledAction.slippage).toBe(0);
+        expect(filledAction.slippage_bps).toBe(0);
+        expect(filledAction.fee).toBe(0.5);
+        expect(filledAction.fee_bps).toBe(5);
+        expect(filledAction.fee_currency).toBe('USD');
+        expect(filledAction.top_tier).toBe('normal');
+        expect(filledAction.quote_at_submission).toMatchObject({
+          ask: '0.43',
+          bid: '0.42',
+          last_price: '0.43',
+          midpoint: '0.425',
+          spread: '0.01',
+        });
+        expect(filledAction.quote_debug).toMatchObject({
+          instrument_id: `${symbol}::${yesOutcomeId}`,
+          market: 'prediction',
+          selected_source: 'db:sdk-integration-feed',
+          price_found: true,
+          side: 'buy',
+          rejection_reason: null,
+        });
+        expect(decision.post_trade_account).toMatchObject({
+          cash: 98999.5,
+          equity: 98999.51,
+          drawdown_decimal: 0,
+          return_decimal: -0.010005,
+        });
+        expect(decision.post_trade_positions).toEqual([
+          expect.objectContaining({
+            symbol,
+            market: 'prediction',
+            object_id: `pm:${symbol}:YES`,
+            event_id: symbol,
+            outcome_id: yesOutcomeId,
+            outcome_name: 'Yes',
+            qty: '2325.581395',
+            avg_price: '0.43',
+            market_price: '0.43',
+          }),
+        ]);
+        expect(decision.post_trade_risk_status).toMatchObject({
+          can_open_new_positions: true,
+          can_trade: true,
+          current_mode: 'normal',
+          risk_tag: null,
+        });
 
         await expect(
           client.submitDecision(

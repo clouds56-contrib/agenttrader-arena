@@ -84,6 +84,7 @@ jobs:
       AUTH_SECRET: ci-auth-secret
       CRON_SECRET: ci-cron-secret
       AGENTTRADER_MARKET_DATA_MODE: sim
+      AGENTTRADER_BRIEFING_WINDOW_MINUTES: 15
       AGENTTRADER_SDK_BASE_URL: http://127.0.0.1:3100
     steps:
       - uses: actions/checkout@v4
