@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test:integration": "npm run build && node tests/live-integration.cjs",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -20,6 +21,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "postgres": "^3.4.7",
     "typescript": "^5.7.0"
   },
   "engines": {
