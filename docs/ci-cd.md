@@ -74,11 +74,11 @@ The CI workflow publishes images to GHCR only for `release.published` events.
 
 Each release publishes three tags per service:
 
-- branch tag: `ghcr.io/<owner>/agentrader-web-new:main`
-- hash tag: `ghcr.io/<owner>/agentrader-web-new:git-<sha:8>`
+- branch tag: `ghcr.io/<owner>/agentrader-web-new:<branch>`
+- hash tag: `ghcr.io/<owner>/agentrader-web-new:git-<short-sha>`
 - release tag: `ghcr.io/<owner>/agentrader-web-new:<release-tag>`
-- branch tag: `ghcr.io/<owner>/agentrader-workers:main`
-- hash tag: `ghcr.io/<owner>/agentrader-workers:git-<sha:8>`
+- branch tag: `ghcr.io/<owner>/agentrader-workers:<branch>`
+- hash tag: `ghcr.io/<owner>/agentrader-workers:git-<short-sha>`
 - release tag: `ghcr.io/<owner>/agentrader-workers:<release-tag>`
 
 ## Docker Artifacts
@@ -165,7 +165,7 @@ Manual VPS deploy accepts:
 Deploy behavior:
 
 - if `image_tag` is set, the workflow deploys that exact GHCR tag and fails if either service image is missing
-- if `image_tag` is empty, the workflow uses the commit selected in GitHub's `Use workflow from` picker, first tries the release-published `git-<sha:8>` images in GHCR, and falls back to the successful `CI` artifacts for that same commit when the registry images do not exist
+- if `image_tag` is empty, the workflow uses the commit selected in GitHub's `Use workflow from` picker, first tries the release-published `git-<short-sha>` images in GHCR, and falls back to the successful `CI` artifacts for that same commit when the registry images do not exist
 - artifact fallback is intended for unreleased or development commits that were built by `CI` but not published to GHCR
 
 ## Notes
