@@ -3,7 +3,9 @@ import { createRequire } from 'node:module';
 import postgres, { type Sql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type {
+  AgentStatusResponse,
   AgentTraderClient as AgentTraderClientType,
+  BriefingResponse,
   DailySummaryUpdate,
   DecisionExecutionResult,
   DecisionRequest,
@@ -14,6 +16,21 @@ import type {
   HeartbeatPingResponse,
   RegistrationRequest,
   RegistrationResponse,
+} from '../src';
+import {
+  agentStatusResponseSchema,
+  briefingResponseSchema,
+  dailySummaryUpdateResultSchema,
+  dailySummaryUpdateSchema,
+  decisionExecutionResultSchema,
+  decisionRequestSchema,
+  detailRequestSchema,
+  detailResponseSchema,
+  errorReportRequestSchema,
+  errorReportResultSchema,
+  heartbeatPingResponseSchema,
+  registrationRequestSchema,
+  registrationResponseSchema,
 } from '../src';
 
 const require = createRequire(import.meta.url);
@@ -436,7 +453,7 @@ describe.sequential('live sdk integration', () => {
         await expect(unauthenticatedClient.me()).rejects.toBeInstanceOf(AgentTraderAuthError);
 
         const client = new AgentTraderClient({ baseUrl });
-        const registrationInput: RegistrationRequest = {
+        const registrationInput: RegistrationRequest = registrationRequestSchema.parse({
           name: `SDK ${token}`,
           description: 'Live SDK integration test agent',
           registration_source: 'sdk-integration-test',
@@ -450,8 +467,10 @@ describe.sequential('live sdk integration', () => {
             risk_preference: 'balanced',
             market_preferences: ['prediction'],
           },
-        };
-        const registration: RegistrationResponse = await client.register(registrationInput);
+        });
+        const registration: RegistrationResponse = registrationResponseSchema.parse(
+          await client.register(registrationInput)
+        );
 
         agentId = registration.agent_id;
         expect(registration.api_key).toMatch(/^at_/);
@@ -459,7 +478,7 @@ describe.sequential('live sdk integration', () => {
         expect(registration.claim_token.length).toBeGreaterThanOrEqual(6);
         expect(registration.next_steps.claim_status_url).toBe(`${baseUrl}/api/agent/me`);
 
-        const meBeforeClaim = await client.me();
+        const meBeforeClaim: AgentStatusResponse = agentStatusResponseSchema.parse(await client.me());
         expect(meBeforeClaim.agent_id).toBe(agentId);
         expect(meBeforeClaim.status).toBe('registered');
 
@@ -478,21 +497,23 @@ describe.sequential('live sdk integration', () => {
           noPrice: 0.57,
         });
 
-        const meAfterClaim = await client.me();
+        const meAfterClaim: AgentStatusResponse = agentStatusResponseSchema.parse(await client.me());
         expect(meAfterClaim.agent_id).toBe(agentId);
         expect(meAfterClaim.status).toBe('active');
 
-        const pong: HeartbeatPingResponse = await client.heartbeatPing();
+        const pong: HeartbeatPingResponse = heartbeatPingResponseSchema.parse(
+          await client.heartbeatPing()
+        );
         expect(pong.agent_id).toBe(agentId);
         expect(pong.pong).toBe(true);
         expect(pong.runner_status).toBe('ready');
 
-        const briefing = await client.getBriefing();
+        const briefing: BriefingResponse = briefingResponseSchema.parse(await client.getBriefing());
         const windowId = briefing.risk_status?.decision_window?.id;
         expect(typeof windowId).toBe('string');
         expect(Array.isArray(briefing.market_signal_summary?.prediction?.top_markets)).toBe(true);
 
-        const detailInput: DetailRequest = {
+        const detailInput: DetailRequest = detailRequestSchema.parse({
           type: 'detail_request',
           request_id: requestId,
           window_id: windowId,
@@ -501,8 +522,10 @@ describe.sequential('live sdk integration', () => {
           reason:
             'Need the current outcome-level quote quality and execution whitelist before placing a prediction trade in this window.',
           objects: [`pm:${symbol}`],
-        };
-        const detail: DetailResponse = await client.requestDetail(detailInput);
+        });
+        const detail: DetailResponse = detailResponseSchema.parse(
+          await client.requestDetail(detailInput)
+        );
 
         expect(detail.type).toBe('detail_response');
         expect(detail.request_id).toBe(requestId);
@@ -517,7 +540,7 @@ describe.sequential('live sdk integration', () => {
           )
         ).toBe(true);
 
-        const decisionInput: DecisionRequest = {
+        const decisionInput: DecisionRequest = decisionRequestSchema.parse({
           type: 'decision',
           decision_id: decisionId,
           window_id: windowId,
@@ -533,10 +556,12 @@ describe.sequential('live sdk integration', () => {
               reason_tag: 'policy repricing',
               reasoning_summary:
                 'The current detail payload whitelists the YES outcome, top-of-book is internally consistent, and the position size remains small versus available cash and concentration limits.',
-            },
-          ],
-        };
-        const decision: DecisionExecutionResult = await client.submitDecision(decisionInput);
+              },
+            ],
+        });
+        const decision: DecisionExecutionResult = decisionExecutionResultSchema.parse(
+          await client.submitDecision(decisionInput)
+        );
 
         expect(decision.type).toBe('decision_execution_result');
         expect(decision.decision_id).toBe(decisionId);
@@ -549,7 +574,8 @@ describe.sequential('live sdk integration', () => {
         expect(decision.actions[0].fill_price).toBe(0.43);
 
         await expect(
-          client.submitDecision({
+          client.submitDecision(
+            decisionRequestSchema.parse({
             type: 'decision',
             decision_id: `dec_duplicate_${token}`,
             window_id: windowId,
@@ -567,14 +593,15 @@ describe.sequential('live sdk integration', () => {
                   'This call intentionally verifies that the server surfaces a structured briefing-window conflict after a successful first decision.',
               },
             ],
-          })
+            })
+          )
         ).rejects.toMatchObject({
           code: 'DECISION_WINDOW_LIMIT',
           statusCode: 409,
           details: { window_id: windowId },
         } satisfies Partial<InstanceType<typeof AgentTraderApiError>>);
 
-        const errorReportInput: ErrorReportRequest = {
+        const errorReportInput: ErrorReportRequest = errorReportRequestSchema.parse({
           type: 'error_report',
           report_type: 'runtime_exception',
           source_endpoint: '/sdk/live-integration',
@@ -590,20 +617,24 @@ describe.sequential('live sdk integration', () => {
             symbol,
             outcome: 'YES',
           },
-        };
-        const errorReport: ErrorReportResult = await client.reportError(errorReportInput);
+        });
+        const errorReport: ErrorReportResult = errorReportResultSchema.parse(
+          await client.reportError(errorReportInput)
+        );
 
         expect(errorReport.type).toBe('error_report_result');
         expect(errorReport.report_type).toBe('runtime_exception');
         expect(errorReport.summary.includes('synthetic runtime note')).toBe(true);
 
-        const dailySummaryInput: DailySummaryUpdate = {
+        const dailySummaryInput: DailySummaryUpdate = dailySummaryUpdateSchema.parse({
           type: 'daily_summary_update',
           summary_date: summaryDate,
           summary:
             'Captured one successful prediction trade during the SDK integration workflow and verified the reporting routes after execution.',
-        };
-        const dailySummary = await client.updateDailySummary(dailySummaryInput);
+        });
+        const dailySummary = dailySummaryUpdateResultSchema.parse(
+          await client.updateDailySummary(dailySummaryInput)
+        );
 
         expect(dailySummary.type).toBe('daily_summary_update_result');
         expect(dailySummary.agent_id).toBe(agentId);
